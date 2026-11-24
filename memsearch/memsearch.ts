@@ -1,0 +1,561 @@
+#!/usr/bin/env -S node --no-warnings
+/**
+ * Search, query and lint Claude memory notes and session digests.
+ *
+ * Files stay the source of truth; everything in the SQLite index is a disposable
+ * cache rebuilt whenever any source file is newer than the index. Embeddings are
+ * cached separately (vectors.db) so index rebuilds never recompute them.
+ *
+ * Needs Node >= 22.18 (node:sqlite + native TypeScript); the installer puts a `memsearch` shim on disk.
+ * Paths are handled with forward slashes on every OS, so Windows paths work too.
+ *
+ * Commands (a bare query is the same as `search`):
+ *   memsearch [search] [-n N] [--project S] [--type T] [--kind K] [--sem|--hybrid] words...
+ *   memsearch ls [--type T] [--kind K] [--older-than 14d] [--newer-than 3d] [--ticket ABC-123] [--active|--archived]
+ *   memsearch lint [--project S]
+ *   memsearch embed            # precompute embeddings for the current index
+ */
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { posix } from 'node:path';
+import { parseArgs } from 'node:util';
+import { DatabaseSync } from 'node:sqlite';
+
+type Param = string | number | null | Uint8Array;
+type Meta = Record<string, string>;
+type Row = Record<string, any>;
+
+// Every path is kept with forward slashes, so the same string logic works on Windows.
+const { basename, dirname, join, normalize } = posix;
+const toPosix = (path: string): string => path.replaceAll('\\', '/');
+const HOME = toPosix(homedir());
+const CLAUDE_HOME = toPosix(process.env.CLAUDE_CONFIG_DIR ?? join(HOME, '.claude'));
+const PROJECTS_DIR = join(CLAUDE_HOME, 'projects');
+const CACHE_DIR = toPosix(process.env.MEMSEARCH_CACHE ?? join(HOME, '.cache/memsearch'));
+const VEC_PATH = join(CACHE_DIR, 'vectors.db');
+const MODEL_CACHE = join(CACHE_DIR, 'models');
+const SCHEMA_VERSION = 3;
+const MODEL = process.env.MEMSEARCH_MODEL ?? 'Xenova/multilingual-e5-small';
+const IS_E5 = MODEL.includes('e5'); // e5 models expect "query: " / "passage: " prefixes
+const QUERY_PREFIX = IS_E5 ? 'query: ' : '';
+const PASSAGE_PREFIX = IS_E5 ? 'passage: ' : '';
+const WIN_CHARS = IS_E5 ? 1200 : 380; // window must fit the model's token limit (512 for e5, 128 for MiniLM)
+const DB_PATH = join(CACHE_DIR, `index-w${WIN_CHARS}.db`); // windows depend on the model, so the index is per window size
+const MAX_WINDOWS = 8;
+const EMBED_BATCH = 32;
+const SNIPPET_CHARS = 400;
+const MIN_TERM_LEN = 3; // trigram tokenizer cannot match shorter terms
+const RRF_K = 60;
+const MEMORY_TYPES = Object.freeze(['user', 'feedback', 'project', 'reference']);
+const TICKET_RE = /\b(?!(?:UTF|SHA|UTC|TEXT|ADR|ISO|MD)-)[A-Z][A-Z0-9]{1,7}-\d{2,6}\b/g;
+const WIKI_LINK_RE = /\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g;
+const MD_LINK_RE = /\]\(([^)\s#]+\.md)(?:#[^)]*)?\)/g;
+const DATE_RE = /(\d{4}-\d{2}-\d{2})/;
+const DURATION_DAYS: Record<string, number> = Object.freeze({ d: 1, w: 7, m: 30 });
+const DAY_SECONDS = 86400;
+
+const SCHEMA = `
+CREATE TABLE files(path TEXT PRIMARY KEY, project TEXT, kind TEXT, name TEXT, description TEXT,
+                   type TEXT, node_type TEXT, updated REAL, archived INTEGER DEFAULT 0, status TEXT);
+CREATE TABLE tickets(path TEXT, ticket TEXT, is_primary INTEGER, hits INTEGER);
+CREATE TABLE links(src TEXT, target TEXT, dst TEXT, form TEXT);
+CREATE TABLE win(chunk INTEGER, sha TEXT);
+CREATE VIRTUAL TABLE notes USING fts5(path UNINDEXED, line UNINDEXED, heading, body, tokenize='trigram');
+`;
+
+const short = (path: string): string => path.replace(`${PROJECTS_DIR}/`, '');
+const sha = (text: string): string => createHash('sha1').update(text).digest('hex');
+const mtimeSeconds = (path: string): number => statSync(path).mtimeMs / 1000;
+const isoDate = (seconds: number): string => new Date(seconds * 1000).toLocaleDateString('sv-SE');
+const fail = (message: string): never => {
+  console.error(message);
+  process.exit(2);
+};
+
+/** Lists every memory note and digest under the projects dir. */
+const sourceFiles = (): string[] => {
+  const files: string[] = [];
+  for (const project of readdirSync(PROJECTS_DIR)) {
+    const memory = join(PROJECTS_DIR, project, 'memory');
+    if (existsSync(memory)) {
+      files.push(...readdirSync(memory).filter((f) => f.endsWith('.md')).map((f) => join(memory, f)));
+    }
+    const digests = join(PROJECTS_DIR, project, 'digests');
+    if (existsSync(digests)) {
+      files.push(...(readdirSync(digests, { recursive: true }) as string[]).filter((f) => f.endsWith('.md')).map((f) => join(digests, toPosix(f))));
+    }
+  }
+  return [...new Set(files)].sort();
+};
+
+const isStale = (files: string[]): boolean => {
+  if (!existsSync(DB_PATH)) {
+    return true;
+  }
+  const db = new DatabaseSync(DB_PATH);
+  const version = (db.prepare('PRAGMA user_version').get() as Row).user_version;
+  db.close();
+  if (version !== SCHEMA_VERSION) {
+    return true;
+  }
+  const dbMtime = mtimeSeconds(DB_PATH);
+  return files.some((f) => mtimeSeconds(f) > dbMtime);
+};
+
+const unquote = (raw: string): string => {
+  const value = raw.trim();
+  const quote = value[0];
+  if (value.length >= 2 && (quote === '"' || quote === "'") && value.endsWith(quote)) {
+    return value.slice(1, -1).replaceAll('\\"', '"');
+  }
+  return quote === '"' ? value.slice(1) : value; // truncated quoted scalar
+};
+
+/** Flat parse of the YAML subset used by memory notes. */
+const parseFrontmatter = (lines: string[]): { meta: Meta; bodyStart: number } => {
+  if (lines[0]?.trim() !== '---') {
+    return { meta: {}, bodyStart: 0 };
+  }
+  const meta: Meta = {};
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === '---') {
+      return { meta, bodyStart: i + 1 };
+    }
+    const m = lines[i].match(/^\s*([A-Za-z_]+):\s*(.*)$/);
+    if (m?.[2]) {
+      meta[m[1]] = unquote(m[2]);
+    }
+  }
+  return { meta, bodyStart: 0 };
+};
+
+const parseUpdated = (meta: Meta, path: string): number => {
+  const modified = meta.modified ? Date.parse(meta.modified) : NaN;
+  if (!Number.isNaN(modified)) {
+    return modified / 1000;
+  }
+  const digestDate = path.includes('/digests/') ? path.split('/digests/')[1].match(DATE_RE)?.[1] : undefined;
+  return digestDate ? Date.parse(`${digestDate}T00:00:00`) / 1000 : mtimeSeconds(path);
+};
+
+// ~/.claude/projects/<slug of the project path>: drop the home dir (and a projects/ folder) from the slug
+const HOME_SLUG_RE = new RegExp(`^${HOME.replace(/[^A-Za-z0-9]/g, '-')}-(projects-)?`);
+const projectOf = (path: string): string => short(path).split('/')[0].replace(HOME_SLUG_RE, '');
+
+/** Splits a chunk into windows that fit the model's token limit. */
+const windows = (heading: string, body: string): string[] => {
+  const text = body.replace(/\s+/g, ' ').trim();
+  const out: string[] = [];
+  let i = 0;
+  while (i < text.length && out.length < MAX_WINDOWS) {
+    let end = Math.min(i + WIN_CHARS, text.length);
+    if (end < text.length) {
+      const cut = text.lastIndexOf(' ', end);
+      end = cut > i + WIN_CHARS / 2 ? cut : end;
+    }
+    out.push(`${heading}. ${text.slice(i, end)}`);
+    i = end;
+  }
+  return out;
+};
+
+/** Splits a note by ##-headings. */
+const chunks = (lines: string[], start: number, defaultHeading: string): { line: number; heading: string; text: string }[] => {
+  const out: { line: number; heading: string; text: string }[] = [];
+  let begin = start;
+  let heading = defaultHeading;
+  for (let i = start; i < lines.length; i++) {
+    if (lines[i].startsWith('## ') && i > begin) {
+      out.push({ line: begin + 1, heading, text: lines.slice(begin, i).join('\n') });
+      begin = i;
+      heading = lines[i].slice(3).trim();
+    }
+  }
+  out.push({ line: begin + 1, heading, text: lines.slice(begin).join('\n') });
+  return out;
+};
+
+const matchAll = (re: RegExp, text: string): RegExpMatchArray[] => [...text.matchAll(re)];
+
+const rebuild = (files: string[]): void => {
+  mkdirSync(CACHE_DIR, { recursive: true });
+  const tmp = `${DB_PATH}.tmp`;
+  rmSync(tmp, { force: true });
+  const db = new DatabaseSync(tmp);
+  db.exec(SCHEMA);
+  db.exec('BEGIN');
+
+  type Raw = { file: string; kind: string; name: string; meta: Meta; lines: string[]; bodyStart: number };
+  const namesByDir = new Map<string, Map<string, string>>(); // memory dir -> note name -> path, for [[wiki]] links
+  const raw: Raw[] = files.map((file) => {
+    const lines = readFileSync(file, 'utf8').split(/\r?\n/);
+    const { meta, bodyStart } = parseFrontmatter(lines);
+    const kind = file.includes('/digests/') ? 'digest' : 'memory';
+    const stem = basename(file, '.md');
+    const name = meta.name || stem;
+    if (kind === 'memory') {
+      const names = namesByDir.get(dirname(file)) ?? new Map<string, string>();
+      names.set(name, file);
+      if (!names.has(stem)) {
+        names.set(stem, file);
+      }
+      namesByDir.set(dirname(file), names);
+    }
+    return { file, kind, name, meta, lines, bodyStart };
+  });
+
+  const insertFile = db.prepare('INSERT INTO files(path, project, kind, name, description, type, node_type, updated, status) VALUES (?,?,?,?,?,?,?,?,?)');
+  const insertNote = db.prepare('INSERT INTO notes(path, line, heading, body) VALUES (?,?,?,?)');
+  const insertWin = db.prepare('INSERT INTO win VALUES (?,?)');
+  const insertTicket = db.prepare('INSERT INTO tickets VALUES (?,?,?,?)');
+  const insertLink = db.prepare('INSERT INTO links VALUES (?,?,?,?)');
+
+  for (const { file, kind, name, meta, lines, bodyStart } of raw) {
+    insertFile.run(file, projectOf(file), kind, name, meta.description ?? '', meta.type ?? '', meta.node_type ?? '', parseUpdated(meta, file), meta.status ?? '');
+
+    const body = lines.slice(bodyStart).join('\n');
+    for (const { line, heading, text } of chunks(lines, bodyStart, basename(file))) {
+      if (!text.trim()) {
+        continue;
+      }
+      const { lastInsertRowid } = insertNote.run(file, line, heading, text);
+      for (const w of windows(heading, text)) {
+        insertWin.run(Number(lastInsertRowid), sha(w));
+      }
+    }
+
+    const head = [name, meta.description ?? '', basename(file)].join(' ');
+    const counts = new Map<string, number>();
+    for (const [ticket] of matchAll(TICKET_RE, `${head}\n${body}`)) {
+      counts.set(ticket, (counts.get(ticket) ?? 0) + 1);
+    }
+    const primary = new Set(matchAll(TICKET_RE, head).map((m) => m[0]));
+    for (const [ticket, hits] of counts) {
+      insertTicket.run(file, ticket, Number(primary.has(ticket)), hits);
+    }
+
+    if (kind === 'memory') {
+      const names = namesByDir.get(dirname(file))!;
+      for (const [, target] of matchAll(WIKI_LINK_RE, body)) {
+        insertLink.run(file, target.trim(), names.get(target.trim()) ?? null, 'wiki');
+      }
+      for (const [, target] of matchAll(MD_LINK_RE, body)) {
+        const dst = normalize(join(dirname(file), target));
+        insertLink.run(file, target, existsSync(dst) ? dst : null, 'md');
+      }
+    }
+  }
+
+  db.exec("UPDATE files SET archived = 1 WHERE path IN (SELECT dst FROM links WHERE dst IS NOT NULL AND src LIKE '%/index_archive.md')");
+  db.exec('COMMIT');
+  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+  db.close();
+  renameSync(tmp, DB_PATH);
+};
+
+const openIndex = (force = false): DatabaseSync => {
+  const files = sourceFiles();
+  if (force || isStale(files)) {
+    rebuild(files);
+  }
+  return new DatabaseSync(DB_PATH);
+};
+
+const ftsQuery = (words: string[]): string =>
+  (words.join(' ').match(/[\p{L}\p{N}_][\p{L}\p{N}_.-]*/gu) ?? []) // JS \w is ASCII-only
+    .filter((w) => w.length >= MIN_TERM_LEN)
+    .map((t) => `"${t.replaceAll('"', '')}"`)
+    .join(' OR ');
+
+type Filters = { project: string; type?: string; kind?: string };
+
+/** WHERE fragments and params for the files table (alias f). */
+const fileFilter = ({ project, type, kind }: Filters): { where: string[]; params: Param[] } => {
+  const where = ['instr(f.path, ?) > 0'];
+  const params: Param[] = [project];
+  if (type) {
+    where.push('f.type = ?');
+    params.push(type);
+  }
+  if (kind) {
+    where.push('f.kind = ?');
+    params.push(kind);
+  }
+  return { where, params };
+};
+
+const ftsSearch = (db: DatabaseSync, words: string[], filters: Filters, limit: number): number[] => {
+  const query = ftsQuery(words);
+  if (!query) {
+    fail(`query terms must be at least ${MIN_TERM_LEN} characters`);
+  }
+  const { where, params } = fileFilter(filters);
+  const rows = db
+    .prepare(`SELECT notes.rowid AS id FROM notes JOIN files f ON f.path = notes.path WHERE notes MATCH ? AND ${where.join(' AND ')} ORDER BY bm25(notes) LIMIT ?`)
+    .all(query, ...params, limit) as Row[];
+  return rows.map((r) => r.id);
+};
+
+type Embedder = (texts: string[], prefix: string) => Promise<Float32Array[]>;
+
+const loadEmbedder = async (): Promise<Embedder> => {
+  const { pipeline, env } = await import('@huggingface/transformers');
+  env.cacheDir = MODEL_CACHE;
+  const extractor: any = await pipeline('feature-extraction', MODEL, { dtype: 'fp32' });
+  return async (texts, prefix) => {
+    const output = await extractor(texts.map((t) => prefix + t), { pooling: 'mean', normalize: true });
+    const [count, dim] = output.dims as number[];
+    return Array.from({ length: count }, (_, i) => Float32Array.from(output.data.slice(i * dim, (i + 1) * dim)));
+  };
+};
+
+const toBlob = (v: Float32Array): Uint8Array => new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+const fromBlob = (b: Uint8Array): Float32Array => new Float32Array(Uint8Array.from(b).buffer);
+
+/** Embeds every window of the current index that is not cached yet. */
+const ensureVectors = async (db: DatabaseSync, embed: Embedder): Promise<DatabaseSync> => {
+  const vdb = new DatabaseSync(VEC_PATH);
+  vdb.exec('CREATE TABLE IF NOT EXISTS vec(sha TEXT, model TEXT, v BLOB, PRIMARY KEY(sha, model))');
+  const have = new Set((vdb.prepare('SELECT sha FROM vec WHERE model = ?').all(MODEL) as Row[]).map((r) => r.sha));
+  const missing = new Map<string, string>();
+  for (const { heading, body } of db.prepare('SELECT heading, body FROM notes').all() as Row[]) {
+    for (const w of windows(heading, body)) {
+      const h = sha(w);
+      if (!have.has(h)) {
+        missing.set(h, w);
+      }
+    }
+  }
+  const items = [...missing];
+  const insert = vdb.prepare('INSERT OR REPLACE INTO vec VALUES (?,?,?)');
+  for (let i = 0; i < items.length; i += EMBED_BATCH) {
+    const batch = items.slice(i, i + EMBED_BATCH);
+    const vectors = await embed(batch.map(([, text]) => text), PASSAGE_PREFIX);
+    vdb.exec('BEGIN');
+    batch.forEach(([h], j) => insert.run(h, MODEL, toBlob(vectors[j])));
+    vdb.exec('COMMIT');
+    console.error(`embedded ${Math.min(i + EMBED_BATCH, items.length)}/${items.length}`);
+  }
+  return vdb;
+};
+
+const semSearch = async (db: DatabaseSync, words: string[], filters: Filters, limit: number): Promise<[number, number][]> => {
+  const embed = await loadEmbedder();
+  const vdb = await ensureVectors(db, embed);
+  const vectors = new Map((vdb.prepare('SELECT sha, v FROM vec WHERE model = ?').all(MODEL) as Row[]).map((r) => [r.sha as string, fromBlob(r.v)]));
+  const { where, params } = fileFilter(filters);
+  const rows = db
+    .prepare(`SELECT w.chunk AS chunk, w.sha AS sha FROM win w JOIN notes n ON n.rowid = w.chunk JOIN files f ON f.path = n.path WHERE ${where.join(' AND ')}`)
+    .all(...params) as Row[];
+  const [query] = await embed([words.join(' ')], QUERY_PREFIX);
+  const best = new Map<number, number>();
+  for (const { chunk, sha: h } of rows) {
+    const v = vectors.get(h);
+    if (!v) {
+      continue;
+    }
+    let score = 0;
+    for (let i = 0; i < v.length; i++) {
+      score += v[i] * query[i];
+    }
+    best.set(chunk, Math.max(best.get(chunk) ?? -1, score));
+  }
+  return [...best].sort((a, b) => b[1] - a[1]).slice(0, limit);
+};
+
+const printChunks = (db: DatabaseSync, rowids: number[], scores?: Map<number, number>): void => {
+  for (const id of rowids) {
+    const { path, line, heading, body } = db.prepare('SELECT path, line, heading, body FROM notes WHERE rowid = ?').get(id) as Row;
+    const { type, updated } = db.prepare('SELECT type, updated FROM files WHERE path = ?').get(path) as Row;
+    const meta = [type, isoDate(updated), scores ? scores.get(id)!.toFixed(2) : ''].filter(Boolean).join(', ');
+    const text = String(body).replace(/\s+/g, ' ').trim();
+    console.log(`${short(path)}:${line}  [${heading}]  (${meta})\n  ${text.slice(0, SNIPPET_CHARS)}\n`);
+  }
+};
+
+type Opts = Record<string, any>;
+
+const cmdSearch = async (opts: Opts, words: string[]): Promise<void> => {
+  const db = openIndex(opts.rebuild);
+  if (!words.length) {
+    return;
+  }
+  const filters: Filters = { project: opts.project, type: opts.type, kind: opts.kind };
+  const n = Number(opts.n);
+  const semantic = opts.sem || opts.hybrid;
+  const fts = opts.sem ? [] : ftsSearch(db, words, filters, n * 4);
+  const sem = semantic ? await semSearch(db, words, filters, n * 4) : [];
+
+  let ranked: number[];
+  let scores: Map<number, number> | undefined;
+  if (opts.sem) {
+    ranked = sem.slice(0, n).map(([c]) => c);
+    scores = new Map(sem);
+  } else if (opts.hybrid) {
+    const fused = new Map<number, number>();
+    for (const list of [fts, sem.map(([c]) => c)]) {
+      list.forEach((chunk, pos) => fused.set(chunk, (fused.get(chunk) ?? 0) + 1 / (RRF_K + pos)));
+    }
+    ranked = [...fused.keys()].sort((a, b) => fused.get(b)! - fused.get(a)!).slice(0, n);
+    scores = fused;
+  } else {
+    ranked = fts.slice(0, n);
+  }
+  if (!ranked.length) {
+    console.log(`no matches${semantic ? '' : ' (try --hybrid for meaning-based search)'}`);
+    return;
+  }
+  printChunks(db, ranked, scores);
+};
+
+const parseDuration = (value: string): number => {
+  const m = value.match(/^(\d+)([dwm])$/);
+  return m ? Number(m[1]) * DURATION_DAYS[m[2]] * DAY_SECONDS : fail('duration must look like 14d, 2w or 3m');
+};
+
+const cmdLs = (opts: Opts): void => {
+  const db = openIndex(opts.rebuild);
+  const { where, params } = fileFilter({ project: opts.project, type: opts.type, kind: opts.kind });
+  const now = Date.now() / 1000;
+  if (opts['older-than']) {
+    where.push('f.updated < ?');
+    params.push(now - parseDuration(opts['older-than']));
+  }
+  if (opts['newer-than']) {
+    where.push('f.updated >= ?');
+    params.push(now - parseDuration(opts['newer-than']));
+  }
+  if (opts.ticket) {
+    where.push(`f.path IN (SELECT t.path FROM tickets t WHERE t.ticket = ?${opts.primary ? ' AND t.is_primary = 1' : ''})`);
+    params.push(String(opts.ticket).toUpperCase());
+  }
+  if (opts.active) {
+    where.push('f.archived = 0');
+  }
+  if (opts.archived) {
+    where.push('f.archived = 1');
+  }
+  const order = ({ updated: 'f.updated', '-updated': 'f.updated DESC', name: 'f.name' } as Record<string, string>)[opts.sort] ?? fail('bad --sort');
+  const rows = db
+    .prepare(`SELECT f.updated, f.type, f.kind, f.project, f.name, f.description, f.archived FROM files f WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ?`)
+    .all(...params, Number(opts.n)) as Row[];
+  for (const r of rows) {
+    const description = String(r.description).replace(/\s+/g, ' ').slice(0, 80);
+    console.log(`${isoDate(r.updated)}  ${(r.type || '-').padEnd(9)} ${r.kind.padEnd(7)} ${r.project.slice(0, 14).padEnd(14)} ${r.name}${r.archived ? ' [archive]' : ''}  ${description}`);
+  }
+  console.log(`(${rows.length} shown)`);
+};
+
+const cmdLint = (opts: Opts): void => {
+  const db = openIndex(opts.rebuild);
+  let problems = 0;
+  const projects = db.prepare("SELECT DISTINCT project FROM files WHERE kind = 'memory' AND instr(path, ?) > 0 ORDER BY 1").all(opts.project) as Row[];
+  for (const { project } of projects) {
+    const out: string[] = [];
+    const broken = db
+      .prepare("SELECT l.src, l.target FROM links l JOIN files f ON f.path = l.src WHERE f.project = ? AND l.dst IS NULL AND l.form = 'md'")
+      .all(project) as Row[];
+    broken.forEach((r) => out.push(`broken link: ${basename(r.src)} -> ${r.target}`));
+
+    const notes = db.prepare("SELECT path, type, name, description, status FROM files WHERE project = ? AND kind = 'memory' ORDER BY name").all(project) as Row[];
+    for (const { path, type, name, description } of notes) {
+      const base = basename(path, '.md');
+      if (base === 'MEMORY') {
+        continue;
+      }
+      if (!description) {
+        out.push(`no description: ${base}`);
+      }
+      if (!MEMORY_TYPES.includes(type)) {
+        out.push(`bad type '${type}': ${base}`);
+      }
+      if (name !== base) {
+        out.push(`name '${name}' differs from file name: ${base}`);
+      }
+    }
+
+    const indexed = new Set(
+      (
+        db
+          .prepare(
+            "SELECT l.dst FROM links l JOIN files f ON f.path = l.src WHERE f.project = ? AND l.dst IS NOT NULL AND (l.src LIKE '%/MEMORY.md' OR l.src LIKE '%/index_%.md')",
+          )
+          .all(project) as Row[]
+      ).map((r) => r.dst),
+    );
+    // active tasks are listed by the active_tasks SessionStart hook, not by MEMORY.md
+    for (const { path, status } of notes) {
+      const base = basename(path);
+      if (base === 'MEMORY.md' || base.startsWith('index_') || indexed.has(path) || status === 'active') {
+        continue;
+      }
+      const inbound = (db.prepare('SELECT COUNT(DISTINCT src) AS c FROM links WHERE dst = ?').get(path) as Row).c;
+      out.push(`orphan (not in MEMORY.md or sub-index, linked from ${inbound} notes): ${base}`);
+    }
+
+    const pending = (
+      db
+        .prepare("SELECT COUNT(DISTINCT l.target) AS c FROM links l JOIN files f ON f.path = l.src WHERE f.project = ? AND l.dst IS NULL AND l.form = 'wiki'")
+        .get(project) as Row
+    ).c;
+    console.log(`== ${project}: ${out.length} problems, ${pending} unresolved [[wiki]] targets (fine: notes still to be written)`);
+    out.forEach((line) => console.log(`  ${line}`));
+    problems += out.length;
+  }
+  process.exit(problems ? 1 : 0);
+};
+
+const cmdEmbed = async (opts: Opts): Promise<void> => {
+  const db = openIndex(opts.rebuild);
+  await ensureVectors(db, await loadEmbedder());
+  console.log('embeddings are up to date');
+};
+
+const COMMANDS = ['search', 'ls', 'lint', 'embed'];
+
+const main = async (): Promise<void> => {
+  let argv = process.argv.slice(2);
+  if (!argv.length || !(COMMANDS.includes(argv[0]) || ['-h', '--help'].includes(argv[0]))) {
+    argv = ['search', ...argv];
+  }
+  if (['-h', '--help'].includes(argv[0])) {
+    console.log(readFileSync(new URL(import.meta.url), 'utf8').split('*/')[0].replace(/^[#!].*\n/, '').replace(/^\/\*\*\n| \* ?/gm, ''));
+    return;
+  }
+  const [command, ...rest] = argv;
+  const { values, positionals } = parseArgs({
+    args: rest,
+    allowPositionals: true,
+    options: {
+      project: { type: 'string', default: '' },
+      rebuild: { type: 'boolean', default: false },
+      type: { type: 'string' },
+      kind: { type: 'string' },
+      n: { type: 'string', short: 'n', default: command === 'ls' ? '50' : '5' },
+      sem: { type: 'boolean', default: false },
+      hybrid: { type: 'boolean', default: false },
+      'older-than': { type: 'string' },
+      'newer-than': { type: 'string' },
+      ticket: { type: 'string' },
+      primary: { type: 'boolean', default: false },
+      active: { type: 'boolean', default: false },
+      archived: { type: 'boolean', default: false },
+      sort: { type: 'string', default: '-updated' },
+    },
+  });
+  if (values.type && !MEMORY_TYPES.includes(values.type)) {
+    fail(`--type must be one of ${MEMORY_TYPES.join(', ')}`);
+  }
+  if (command === 'search') {
+    await cmdSearch(values, positionals);
+  } else if (command === 'ls') {
+    cmdLs(values);
+  } else if (command === 'lint') {
+    cmdLint(values);
+  } else {
+    await cmdEmbed(values);
+  }
+};
+
+await main();
