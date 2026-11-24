@@ -15,7 +15,7 @@
 import { spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
@@ -26,6 +26,8 @@ const CLAUDE_HOME = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 const TARGET = join(CLAUDE_HOME, 'claude-memory');
 const SETTINGS = join(CLAUDE_HOME, 'settings.json');
 const CLAUDE_MD = join(CLAUDE_HOME, 'CLAUDE.md');
+// Outside skills/: Claude Code loads every SKILL.md there, a backup would show up as a duplicate skill.
+const BACKUPS = join(CLAUDE_HOME, 'backups', 'claude-memory');
 const SKILLS = ['wrap', 'sleep'];
 const HOOK_MARK = 'claude-memory/hooks/';
 const MD_START = '<!-- claude-memory:start -->';
@@ -70,7 +72,9 @@ const slash = (path) => path.replaceAll('\\', '/');
 /** Path as the user would type it in a shell: ~/… under the home dir. */
 const tilde = (path) => {
     const rel = relative(homedir(), path);
-    return rel && !rel.startsWith('..') ? `~/${slash(rel)}` : slash(path);
+    // on Windows a path on another drive comes back absolute
+    const isUnderHome = rel && !rel.startsWith('..') && !isAbsolute(rel);
+    return isUnderHome ? `~/${slash(rel)}` : slash(path);
 };
 
 const versionOk = (version) => {
@@ -187,8 +191,10 @@ const installSkills = () => {
             continue;
         }
         if (existsSync(dir)) {
-            renameSync(dir, `${dir}.bak-${STAMP}`);
-            warn(`existing skill ${tilde(dir)} moved to ${tilde(dir)}.bak-${STAMP}`);
+            const backup = join(BACKUPS, STAMP, 'skills', name);
+            mkdirSync(dirname(backup), { recursive: true });
+            renameSync(dir, backup);
+            warn(`existing skill ${tilde(dir)} moved to ${tilde(backup)}`);
         }
         for (const [file, text] of Object.entries(files)) {
             mkdirSync(dirname(join(dir, file)), { recursive: true });

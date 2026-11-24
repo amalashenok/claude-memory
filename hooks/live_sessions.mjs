@@ -13,7 +13,7 @@
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { IS_WINDOWS, PROJECTS_DIR, STATE_DIR, localDate, localTime, readPayload, readTranscript, runHook, writeAtomic } from './lib.mjs';
+import { IS_WINDOWS, PROJECTS_DIR, STATE_DIR, localDate, localTime, readPayload, readTranscript, runHook, squash, writeAtomic } from './lib.mjs';
 
 export const LIVE_DIR = join(STATE_DIR, 'live');
 export const SESSIONS_DIR = join(LIVE_DIR, 'sessions');
@@ -125,7 +125,7 @@ const main = () => {
             console.log(`Parallel Claude sessions (live registry, \`claude-memory live list\`):\n${others.map((o) => describe(o, now)).join('\n')}`);
         }
     } else if (mode === 'prompt') {
-        const text = String(payload.prompt ?? '').replace(/\s+/g, ' ').trim().slice(0, TASK_CHARS);
+        const text = squash(String(payload.prompt ?? '')).slice(0, TASK_CHARS);
         const isTask = text.length >= MIN_PROMPT_CHARS && !text.startsWith('/');
         if (isTask) {
             s.task = text;
@@ -139,7 +139,7 @@ const main = () => {
         const file = input.file_path ?? input.notebook_path ?? '';
         s.tools += 1;
         s.lastTool = tool;
-        s.lastTarget = file || String(input.command ?? input.pattern ?? input.query ?? '').replace(/\s+/g, ' ').slice(0, TARGET_CHARS);
+        s.lastTarget = file || squash(String(input.command ?? input.pattern ?? input.query ?? '')).slice(0, TARGET_CHARS);
         if (!s.task) {
             s.task = firstPrompt(payload.transcript_path);
             s.taskFirst ||= s.task;

@@ -107,7 +107,7 @@ const askModel = (system, input) => {
         let r = spawnSync(CLAUDE_BIN, args, opts);
         // An npm install puts claude.cmd on PATH, and Node runs .cmd files only through a shell.
         if (r.error && IS_WINDOWS) {
-            r = spawnSync([CLAUDE_BIN, ...args.map((a) => `"${a}"`)].join(' '), { ...opts, shell: true });
+            r = spawnSync([CLAUDE_BIN, ...args].map((a) => `"${a}"`).join(' '), { ...opts, shell: true });
         }
         if (r.status !== 0) {
             log(`claude -p failed (${r.status ?? r.error}): ${String(r.stderr ?? '').slice(0, 500)}`);
@@ -145,18 +145,32 @@ const withLock = async (name, body) => {
     }
 };
 
+/** Same mtime as the transcript: catch-up re-digests only when the session grew. */
+const writeEntry = (out, text, transcript) => {
+    writeAtomic(out, text);
+    const { atime, mtime } = statSync(transcript);
+    utimesSync(out, atime, mtime);
+};
+
+/**
+ * Writes the diary entry of one session.
+ * @returns {boolean} true when the model was asked, so catch-up can budget its calls
+ */
 const digestSession = (transcript) => {
     if (!existsSync(transcript)) {
-        return;
+        return false;
     }
     const messages = readTranscript(transcript);
-    if (messages.filter((m) => m.role === 'user').length < MIN_PROMPTS) {
-        return;
-    }
     const sid = basename(transcript, '.jsonl');
     const { first, last } = transcriptSpan(transcript);
     const lastDate = last ? new Date(last) : new Date();
     const out = join(dirname(transcript), 'digests', 'days', localDate(lastDate), `${sid}.md`);
+    // A skip mark keeps a trivial session from being picked up by every catch-up.
+    const isTrivial = messages.filter((m) => m.role === 'user').length < MIN_PROMPTS;
+    if (isTrivial) {
+        writeEntry(out, `${SKIP_MARK}\n`, transcript);
+        return false;
+    }
 
     const condensed = messages
         .map((m) => (m.role === 'user' ? `USER: ${m.text.slice(0, USER_CHARS)}` : `CLAUDE: ${m.text.slice(0, ASSISTANT_CHARS)}`))
@@ -165,13 +179,11 @@ const digestSession = (transcript) => {
     const body = askModel(SESSION_SYSTEM, `TIME: ${span}\n\n${clipMiddle(condensed)}`);
     if (!body) {
         log(`digest failed: ${sid}`);
-        return;
+        return true;
     }
-    writeAtomic(out, body.trim() === 'SKIP' ? `${SKIP_MARK}\n` : `${body}\n`);
-    // Same mtime as the transcript: catch-up re-digests only when the session grew.
-    const { atime, mtime } = statSync(transcript);
-    utimesSync(out, atime, mtime);
+    writeEntry(out, body.trim() === 'SKIP' ? `${SKIP_MARK}\n` : `${body}\n`, transcript);
     log(`digested ${sid} -> ${out}`);
+    return true;
 };
 
 const needsDigest = (transcript) => {
@@ -196,8 +208,7 @@ const catchup = (projectDir, exclude = '') =>
             if (done >= CATCHUP_MAX) {
                 break;
             }
-            if (needsDigest(t)) {
-                digestSession(t);
+            if (needsDigest(t) && digestSession(t)) {
                 done++;
             }
         }
@@ -220,9 +231,9 @@ const monthOfWeek = (week) => {
     return monday.toISOString().slice(0, 7);
 };
 
-const dayEntries = (dayDir) =>
+const dayEntries = (dayDir, excludeSid = '') =>
     listDir(dayDir)
-        .filter((f) => f.endsWith('.md'))
+        .filter((f) => f.endsWith('.md') && basename(f, '.md') !== excludeSid)
         .map((f) => join(dayDir, f))
         .sort((a, b) => mtimeMs(a) - mtimeMs(b))
         .map((f) => readFileSync(f, 'utf8').trim())
@@ -264,7 +275,9 @@ const rollup = (projectDir) =>
         const weekFiles = listDir(join(root, 'weeks')).filter((f) => /^\d{4}-W\d{2}\.md$/.test(f));
         for (const month of [...new Set(days.map((d) => d.slice(0, 7)))]) {
             const out = join(root, 'months', `${month}.md`);
-            if (month === thisMonth || (existsSync(out) && statSync(out).size)) {
+            // The week that started in this month may still be running into the next one.
+            const isOpen = month === thisMonth || monthOfWeek(thisWeek) === month;
+            if (isOpen || (existsSync(out) && statSync(out).size)) {
                 continue;
             }
             const input = weekFiles
@@ -308,13 +321,7 @@ const sectionOf = (text, heading) => {
 const recall = (projectDir, currentSid) => {
     const root = join(projectDir, 'digests');
     const today = localDate();
-    const todayDir = join(root, 'days', today);
-    const todayEntries = listDir(todayDir)
-        .filter((f) => f.endsWith('.md') && basename(f, '.md') !== currentSid)
-        .map((f) => join(todayDir, f))
-        .sort((a, b) => mtimeMs(a) - mtimeMs(b))
-        .map((f) => readFileSync(f, 'utf8').trim())
-        .filter((text) => text && text !== SKIP_MARK);
+    const todayEntries = dayEntries(join(root, 'days', today), currentSid);
 
     const prev = listDir(join(root, 'days'))
         .filter((d) => d < today)
@@ -377,7 +384,8 @@ await runHook(async () => {
     } else if (mode === 'background') {
         await catchup(arg1, arg2);
         await rollup(arg1);
-        embed();
+        // every SessionStart spawns this; one embedding run at a time is enough
+        await withLock('embed', embed);
     } else if (mode === 'catchup') {
         await catchup(arg1, arg2);
     } else if (mode === 'rollup') {

@@ -11,7 +11,7 @@ This is the agent's "sleep": a quiet pass over what the project has accumulated.
 
 ```bash
 CLAUDE_HOME="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SLUG=$(pwd | sed 's#[^A-Za-z0-9]#-#g')          # /home/me/projects/shop -> -home-me-projects-shop
+SLUG=$( (pwd -W 2>/dev/null || pwd) | sed 's#[^A-Za-z0-9]#-#g')   # /home/me/projects/shop -> -home-me-projects-shop; Git Bash: C:/x -> C--x
 ROOT="$CLAUDE_HOME/projects/$SLUG"
 MEM="$ROOT/memory"                               # notes + MEMORY.md
 DIGESTS="$ROOT/digests"                          # session diary

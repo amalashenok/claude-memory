@@ -5,10 +5,11 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
@@ -123,6 +124,30 @@ describe('episodic diary', () => {
         assert.match(recall, /fake topic/);
     });
 
+    test('trivial sessions do not use up the catch-up budget', async () => {
+        const hourAgo = new Date(Date.now() - 3_600_000);
+        for (let i = 0; i < 8; i++) {
+            const trivial = join(projectDir, `trivial-${i}.jsonl`);
+            writeFileSync(trivial, `${JSON.stringify({ type: 'user', message: { content: 'hi there' }, timestamp: hourAgo.toISOString() })}\n`);
+            utimesSync(trivial, hourAgo, hourAgo);
+        }
+        const real = join(projectDir, 'real-late.jsonl');
+        writeTranscript(real);
+        utimesSync(real, new Date(), new Date(Date.now() - 1_800_000));
+        const days = join(projectDir, 'digests', 'days');
+        const isDigested = () => existsSync(join(days, localDate(), 'real-late.md'));
+        // recall above spawned a background catch-up; while it holds the lock a new one just returns
+        for (let i = 0; i < 50 && !isDigested(); i++) {
+            hook('episodic_memory.mjs', ['catchup', projectDir, 'session-one']);
+            if (!isDigested()) {
+                await sleep(200);
+            }
+        }
+        const entries = readdirSync(days).flatMap((d) => readdirSync(join(days, d)));
+        assert.ok(entries.includes('real-late.md'), 'the real session got an entry');
+        assert.equal(entries.filter((f) => f.startsWith('trivial-')).length, 8, 'trivial sessions got skip marks');
+    });
+
     test('the summarizer child never digests', () => {
         const r = spawnSync(process.execPath, [join(HOOKS, 'episodic_memory.mjs'), 'recall'], {
             input: JSON.stringify({ session_id: 'x', cwd: project }),
@@ -155,6 +180,19 @@ describe('memory notes', () => {
         const registry = readFileSync(join(projectDir, 'memory', 'REGISTRY.md'), 'utf8');
         assert.match(registry, /ACME-412/);
         assert.match(registry, /\| active \|/);
+    });
+
+    test('lint stays clean after the registry is generated', () => {
+        assert.match(run(join(REPO, 'memsearch', 'memsearch.ts'), ['lint']), /0 problems/);
+    });
+
+    test('a deleted note leaves the search index', () => {
+        const memsearch = join(REPO, 'memsearch', 'memsearch.ts');
+        const note = join(projectDir, 'memory', 'project_short_lived.md');
+        writeFileSync(note, '---\nname: project_short_lived\ndescription: "ACME-999 note"\ntype: project\n---\nACME-999\n');
+        assert.match(run(memsearch, ['ls', '--ticket', 'ACME-999']), /project_short_lived/);
+        rmSync(note);
+        assert.doesNotMatch(run(memsearch, ['ls', '--ticket', 'ACME-999']), /project_short_lived/);
     });
 });
 

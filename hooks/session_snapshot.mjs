@@ -6,7 +6,6 @@
  * state/last-session-<project slug>.md   latest snapshot of the project
  * state/clear-handoff-<window key>.md    on /clear: this window's own snapshot for the session right after it
  */
-import { copyFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { STATE_DIR, clip, git, localDate, localTime, readPayload, readTranscript, runHook, slugOf, windowKey, writeAtomic } from './lib.mjs';
 
@@ -51,12 +50,13 @@ await runHook(() => {
     }
     const cwd = payload.cwd || process.cwd();
     const event = payload.hook_event_name || 'unknown';
-    const out = join(STATE_DIR, `last-session-${slugOf(cwd)}.md`);
-    writeAtomic(out, render({ cwd, sessionId: payload.session_id, transcript: payload.transcript_path, event }));
+    const text = render({ cwd, sessionId: payload.session_id, transcript: payload.transcript_path, event });
+    writeAtomic(join(STATE_DIR, `last-session-${slugOf(cwd)}.md`), text);
 
-    // The project-wide file may already belong to a parallel session in the same project.
+    // The project-wide file may already belong to a parallel session in the same project,
+    // so the hand-off gets this session's own text, not a copy of that file.
     const isClear = event === 'SessionEnd' && payload.reason === 'clear';
     if (isClear) {
-        copyFileSync(out, join(STATE_DIR, `clear-handoff-${windowKey(cwd)}.md`));
+        writeAtomic(join(STATE_DIR, `clear-handoff-${windowKey(cwd)}.md`), text);
     }
 });

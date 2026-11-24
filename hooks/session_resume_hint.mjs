@@ -19,8 +19,12 @@ const ageMs = (path) => Date.now() - statSync(path).mtimeMs;
 const dropStaleHandoffs = () => {
     for (const name of existsSync(STATE_DIR) ? readdirSync(STATE_DIR) : []) {
         const path = join(STATE_DIR, name);
-        if (HANDOFF_RE.test(name) && ageMs(path) > DAY_MS) {
-            rmSync(path, { force: true });
+        try {
+            if (HANDOFF_RE.test(name) && ageMs(path) > DAY_MS) {
+                rmSync(path, { force: true });
+            }
+        } catch {
+            // a parallel session consumed it between readdir and stat
         }
     }
 };

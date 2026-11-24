@@ -10,12 +10,13 @@
  *   claude-memory catchup [project dir]       write missing diary entries for recent sessions now
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { parseFrontmatter } from '../hooks/frontmatter.mjs';
-import { STATE_DIR, localDate, localTime, projectDirOf, readStdin, windowKey, writeAtomic } from '../hooks/lib.mjs';
+import { LOG_FILE, STATE_DIR, localDate, localTime, projectDirOf, readStdin, windowKey, writeAtomic } from '../hooks/lib.mjs';
 import { EVENTS_FILE, liveSessions } from '../hooks/live_sessions.mjs';
 
 const HOOKS_DIR = fileURLToPath(new URL('../hooks/', import.meta.url));
@@ -67,24 +68,56 @@ const liveFiles = (prefix = '') => {
     }
 };
 
+const readBytes = (path, from, to) => {
+    const buffer = Buffer.alloc(to - from);
+    const fd = openSync(path, 'r');
+    try {
+        // the file may shrink between stat and read; only the bytes actually read count
+        return buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, from));
+    } finally {
+        closeSync(fd);
+    }
+};
+
+const printEvent = (line) => {
+    try {
+        const e = JSON.parse(line);
+        console.log(`${new Date(e.at).toLocaleTimeString('sv-SE')} ${e.sid} ${e.project} ${e.event} ${e.target ?? ''}`);
+    } catch {
+        // a line damaged by rotation; skip it
+    }
+};
+
+/** Follows the event stream; the offset is in bytes and a half-written last line waits for the next poll. */
 const liveWatch = async () => {
     let offset = existsSync(EVENTS_FILE) ? statSync(EVENTS_FILE).size : 0;
+    let decoder = new StringDecoder('utf8');
+    let pending = '';
     for (;;) {
         await sleep(WATCH_POLL_MS);
         const size = existsSync(EVENTS_FILE) ? statSync(EVENTS_FILE).size : 0;
         if (size < offset) {
             offset = 0; // the file was rotated
+            decoder = new StringDecoder('utf8');
+            pending = '';
         }
         if (size === offset) {
             continue;
         }
-        const chunk = readFileSync(EVENTS_FILE, 'utf8').slice(offset);
-        offset = size;
-        for (const line of chunk.split('\n').filter(Boolean)) {
-            const e = JSON.parse(line);
-            console.log(`${new Date(e.at).toLocaleTimeString('sv-SE')} ${e.sid} ${e.project} ${e.event} ${e.target ?? ''}`);
-        }
+        const chunk = readBytes(EVENTS_FILE, offset, size);
+        offset += chunk.length;
+        const lines = (pending + decoder.write(chunk)).split('\n');
+        pending = lines.pop();
+        lines.filter(Boolean).forEach(printEvent);
     }
+};
+
+/** Local YYYY-MM-DD of `modified`; a bare date is taken as written, not as UTC midnight. */
+const noteDate = (modified = '', path) => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(modified)) {
+        return modified;
+    }
+    return localDate(new Date(Date.parse(modified) || statSync(path).mtimeMs));
 };
 
 /** Regenerates REGISTRY.md: one row per memory note with its tickets and status. */
@@ -98,7 +131,7 @@ const registry = (memDir) => {
             const path = join(memDir, file);
             const { meta, lines, bodyStart } = parseFrontmatter(readFileSync(path, 'utf8'));
             const tickets = [...new Set(lines.slice(bodyStart).join('\n').match(TICKET_RE) ?? [])];
-            const date = localDate(new Date(Date.parse(meta.modified ?? '') || statSync(path).mtimeMs));
+            const date = noteDate(meta.modified, path);
             const description = (meta.description || meta.name || file).replaceAll('|', '\\|');
             return { date, type: meta.type ?? '?', description, refs: tickets.join(', ') || '—', status: meta.status ?? '—', file };
         })
@@ -120,7 +153,7 @@ const registry = (memDir) => {
 const catchup = (projectRoot) => {
     const projectDir = projectDirOf(resolve(projectRoot ?? process.cwd()));
     const r = spawnSync(process.execPath, [join(HOOKS_DIR, 'episodic_memory.mjs'), 'catchup', projectDir], { stdio: 'inherit' });
-    console.log(`catch-up finished for ${projectDir} (details in ${join(STATE_DIR, 'claude-memory.log')})`);
+    console.log(`catch-up finished for ${projectDir} (details in ${LOG_FILE})`);
     process.exitCode = r.status ?? 1;
 };
 
