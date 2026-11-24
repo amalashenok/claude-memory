@@ -1,5 +1,5 @@
 /**
- * Shared helpers for the claude-memory hooks and tools.
+ * Shared helpers for the elephant-memory hooks and tools.
  * Plain Node.js (no dependencies), works on Linux, macOS and Windows.
  */
 import { spawnSync } from 'node:child_process';

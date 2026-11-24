@@ -1,10 +1,10 @@
-# claude-memory
+# elephant-memory
 
-[![tests](https://github.com/amalashenok/claude-memory/actions/workflows/tests.yml/badge.svg)](https://github.com/amalashenok/claude-memory/actions/workflows/tests.yml)
+[![tests](https://github.com/amalashenok/elephant-memory/actions/workflows/tests.yml/badge.svg)](https://github.com/amalashenok/elephant-memory/actions/workflows/tests.yml)
 
 ### Your Claude Code has the memory of a goldfish. Give it an elephant's.
 
-Every `/clear`, every restart, every new window, and [Claude Code](https://docs.claude.com/en/docs/claude-code) starts from zero. You explain the task again, paste the branch name again, remind it what you decided yesterday. claude-memory ends that. Open a session and just ask:
+Every `/clear`, every restart, every new window, and [Claude Code](https://docs.claude.com/en/docs/claude-code) starts from zero. You explain the task again, paste the branch name again, remind it what you decided yesterday. elephant-memory ends that. Open a session and just ask:
 
 <p align="center">
   <img src="docs/demo.svg" alt="A new Claude Code session answers 'Where did we stop, and what's next?' with the branch, uncommitted files, tests, the next step and side tasks" width="900">
@@ -26,15 +26,15 @@ No server, no cloud, no database to look after: plain Markdown in `~/.claude`, a
 In Claude Code:
 
 ```
-/plugin marketplace add amalashenok/claude-memory
+/plugin marketplace add amalashenok/elephant-memory
 /plugin install elephant-memory@elephant-memory
 ```
 
-Or ask Claude: *"Install claude-memory from github.com/amalashenok/claude-memory"*: the [steps for agents](#for-ai-agents) below are written for it. Other ways: [install script](#install-script), [skills only](#skills-only-skillssh).
+Or ask Claude: *"Install elephant-memory from github.com/amalashenok/elephant-memory"*: the [steps for agents](#for-ai-agents) below are written for it. Other ways: [install script](#install-script), [skills only](#skills-only-skillssh).
 
 ## Before and after
 
-| Without | With claude-memory |
+| Without | With elephant-memory |
 |---|---|
 | `/clear` wipes the context and you explain the task again | the next session starts from a snapshot of where you stopped, plus your own `/wrap` summary |
 | "What did I do yesterday?" means scrolling through old transcripts | an automatic diary: 2–4 lines per session, rolled up by week and by month |
@@ -45,7 +45,7 @@ Or ask Claude: *"Install claude-memory from github.com/amalashenok/claude-memory
 
 ## Under the hood
 
-Claude Code already keeps a per-project memory directory (`~/.claude/projects/<project>/memory/` with a `MEMORY.md` index). claude-memory builds on it with hooks, two skills and a search tool:
+Claude Code already keeps a per-project memory directory (`~/.claude/projects/<project>/memory/` with a `MEMORY.md` index). elephant-memory builds on it with hooks, two skills and a search tool:
 
 - **Where we stopped.** Every turn saves a snapshot: branch, uncommitted files, the last prompts, where the answer ended. The next session in the project starts with it, and after `/clear` the window gets its own snapshot back.
 - **Session diary.** When a session ends, a small model writes a 2–4 line entry (done / decided / open). Finished weeks and months are rolled up. A new session starts with today's other sessions, the last working day and last week's loose ends.
@@ -88,18 +88,20 @@ flowchart LR
 
 Pick one way. The plugin and the install script give the same hooks and tools; don't use both, or every hook runs twice (the plugin warns about it at session start).
 
+The tools, launchers and state keep the project's original name on disk: `~/.claude/claude-memory/`, the `claude-memory` command, `claude-memory` markers in `CLAUDE.md`.
+
 ### Plugin (recommended)
 
 In a Claude Code session:
 
 ```
-/plugin marketplace add amalashenok/claude-memory
+/plugin marketplace add amalashenok/elephant-memory
 /plugin install elephant-memory@elephant-memory
 ```
 
-The same from a shell: `claude plugin marketplace add amalashenok/claude-memory && claude plugin install elephant-memory@elephant-memory`. Restart Claude Code sessions afterwards.
+The same from a shell: `claude plugin marketplace add amalashenok/elephant-memory && claude plugin install elephant-memory@elephant-memory`. Restart Claude Code sessions afterwards.
 
-The plugin is named `elephant-memory` because Claude Code reserves plugin names that start with `claude-`. Compared with the install script:
+Compared with the install script:
 
 - every feature is on (diary, live registry); for `--no-diary` or `--no-live`, use the install script;
 - `memsearch` does full-text search only; `--hybrid` needs the embedding runtime that the install script sets up with npm;
@@ -113,8 +115,8 @@ Update: `claude plugin marketplace update elephant-memory && claude plugin updat
 ### Install script
 
 ```sh
-git clone https://github.com/amalashenok/claude-memory.git
-cd claude-memory
+git clone https://github.com/amalashenok/elephant-memory.git
+cd elephant-memory
 ./install.sh                 # Linux, macOS, Git Bash
 ```
 
@@ -147,32 +149,32 @@ Running it again updates the installation in place. Restart Claude Code sessions
 ### Skills only (skills.sh)
 
 ```sh
-npx skills add amalashenok/claude-memory
+npx skills add amalashenok/elephant-memory
 ```
 
-This installs only `/wrap` and `/sleep`. They call the claude-memory tools and rely on its hooks, so install the plugin or run the install script as well; without them the skills stop and say so.
+This installs only `/wrap` and `/sleep`. They call the elephant-memory tools and rely on its hooks, so install the plugin or run the install script as well; without them the skills stop and say so.
 
 ## For AI agents
 
-Steps for an agent asked to install claude-memory for its user. Run them one by one and report what happened.
+Steps for an agent asked to install elephant-memory for its user. Run them one by one and report what happened.
 
 1. **Check Node.js:** `node --version` must be ≥ 22.18. If it is older, stop and tell the user. The install script can also use another binary with `--node <path>`.
 2. **Check for an existing install:** `claude plugin list` shows `elephant-memory`, or the directory `~/.claude/claude-memory/hooks/` exists (install script). If either is present, update that one instead of adding the other.
 3. **Ask the user one question:** the session diary sends a condensed transcript of each session (prompts and answers, no tool output) to a small model through their own `claude -p`. Do they want it? If not, use the install script with `--no-diary`.
 4. **Install.** Plugin, without prompts:
    ```sh
-   claude plugin marketplace add amalashenok/claude-memory
+   claude plugin marketplace add amalashenok/elephant-memory
    claude plugin install elephant-memory@elephant-memory
    ```
    Install script: clone to a durable place (not a temp dir; the hooks run from `~/.claude/claude-memory/`, but updates are run from the clone), then run it:
    ```sh
-   git clone https://github.com/amalashenok/claude-memory.git ~/claude-memory
-   node ~/claude-memory/install.mjs            # add --no-diary, --no-live, --no-embeddings as the user chose
+   git clone https://github.com/amalashenok/elephant-memory.git ~/elephant-memory
+   node ~/elephant-memory/install.mjs            # add --no-diary, --no-live, --no-embeddings as the user chose
    ```
 5. **Verify:** `~/.claude/claude-memory/bin/memsearch lint` exits 0. For the install script, `~/.claude/settings.json` has hooks whose command contains `claude-memory/hooks/`. The plugin writes its launchers at the first session start after install, so for the plugin this check passes only after a restart.
 6. **Tell the user:** restart Claude Code sessions to load the hooks. Memory builds up from the next session; `/wrap` before `/clear`, `/sleep` now and then (`/elephant-memory:wrap` and `/elephant-memory:sleep` with the plugin).
 
-Never edit or delete `~/.claude/projects/*/memory/` or `digests/`: they are the user's memory. To remove claude-memory: `claude plugin uninstall elephant-memory@elephant-memory` and delete `~/.claude/claude-memory/`, or `node install.mjs --uninstall` from the clone.
+Never edit or delete `~/.claude/projects/*/memory/` or `digests/`: they are the user's memory. To remove elephant-memory: `claude plugin uninstall elephant-memory@elephant-memory` and delete `~/.claude/claude-memory/`, or `node install.mjs --uninstall` from the clone.
 
 ## Usage
 

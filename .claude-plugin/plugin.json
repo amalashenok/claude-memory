@@ -2,8 +2,8 @@
   "name": "elephant-memory",
   "description": "Long-term memory for Claude Code: where-we-stopped snapshots, an automatic session diary, active tasks, parallel-session awareness, memsearch, and the /wrap and /sleep skills.",
   "author": { "name": "amalashenok", "url": "https://github.com/amalashenok" },
-  "homepage": "https://github.com/amalashenok/claude-memory",
-  "repository": "https://github.com/amalashenok/claude-memory",
+  "homepage": "https://github.com/amalashenok/elephant-memory",
+  "repository": "https://github.com/amalashenok/elephant-memory",
   "license": "MIT",
   "keywords": ["memory", "hooks", "session", "diary", "context", "skills"]
 }

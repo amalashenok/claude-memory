@@ -315,7 +315,7 @@ const loadTransformers = async () => {
     return await import('@huggingface/transformers');
   } catch {
     const dir = fileURLToPath(new URL('.', import.meta.url));
-    return fail(`--sem and --hybrid need the embedding runtime: run \`npm install --omit=dev\` in ${dir}, or install claude-memory with install.mjs`);
+    return fail(`--sem and --hybrid need the embedding runtime: run \`npm install --omit=dev\` in ${dir}, or install elephant-memory with install.mjs`);
   }
 };
 

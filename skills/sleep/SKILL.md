@@ -9,7 +9,7 @@ This is the agent's "sleep": a quiet pass over what the project has accumulated.
 
 ## Requirement
 
-This skill needs claude-memory's hooks and tools. If `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/claude-memory/bin/claude-memory` does not exist (for example, only the skill was installed with `npx skills`), stop and tell the user to install claude-memory first: in Claude Code, `/plugin marketplace add amalashenok/claude-memory`, then `/plugin install elephant-memory@elephant-memory`; or see https://github.com/amalashenok/claude-memory#install.
+This skill needs elephant-memory's hooks and tools. If `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/claude-memory/bin/claude-memory` does not exist (for example, only the skill was installed with `npx skills`), stop and tell the user to install elephant-memory first: in Claude Code, `/plugin marketplace add amalashenok/elephant-memory`, then `/plugin install elephant-memory@elephant-memory`; or see https://github.com/amalashenok/elephant-memory#install.
 
 ## 0. Resolve paths (do not ask the user)
 

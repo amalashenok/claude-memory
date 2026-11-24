@@ -292,7 +292,7 @@ describe('plugin', () => {
 
     test('setup writes launchers to this copy and prints the conventions', () => {
         const out = setup();
-        assert.match(out, /## Memory \(claude-memory\)/);
+        assert.match(out, /## Memory \(elephant-memory\)/);
         const launcher = readFileSync(join(target, 'claude-memory', 'bin', 'memsearch'), 'utf8');
         assert.ok(launcher.includes(join(REPO, 'memsearch', 'memsearch.ts').replaceAll('\\', '/')));
         const help = spawnSync(process.execPath, ['--no-warnings', join(REPO, 'tools', 'claude-memory.mjs'), 'help'], { encoding: 'utf8', env: { ...env, CLAUDE_CONFIG_DIR: target } });

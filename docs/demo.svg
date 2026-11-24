@@ -6,7 +6,7 @@
 <text x="450.0" y="21" text-anchor="middle" fill="#7d8590" style="font-size:12px">~/acme-shop — claude</text>
 <clipPath id="c0"><rect x="22" y="57" height="21" style="animation:w0 22.00s steps(8) infinite"/></clipPath>
 <text x="22" y="73" fill="#e6edf3" clip-path="url(#c0)"><tspan fill="#3fb950">$</tspan><tspan fill="#e6edf3"> claude</tspan></text>
-<text x="22" y="94" fill="#e6edf3" style="opacity:0;animation:o1 22.00s linear infinite"><tspan fill="#3fb950">✓ </tspan><tspan fill="#7d8590">claude-memory · context loaded at session start</tspan></text>
+<text x="22" y="94" fill="#e6edf3" style="opacity:0;animation:o1 22.00s linear infinite"><tspan fill="#3fb950">✓ </tspan><tspan fill="#7d8590">elephant-memory · context loaded at session start</tspan></text>
 <text x="22" y="115" fill="#e6edf3" style="opacity:0;animation:o2 22.00s linear infinite"><tspan fill="#d97757">◆ </tspan><tspan fill="#7d8590">snapshot  </tspan><tspan fill="#e6edf3" fill-opacity="0.82">branch ACME-412-checkout-retry · last commit 0d9398a · uncommitted: checkout/pay.js, test/</tspan></text>
 <text x="22" y="136" fill="#e6edf3" style="opacity:0;animation:o3 22.00s linear infinite"><tspan fill="#d97757">◆ </tspan><tspan fill="#7d8590">last time </tspan><tspan fill="#e6edf3" fill-opacity="0.82">“Now run the tests please” → “All 12 tests pass. Next: a load test in staging”</tspan></text>
 <text x="22" y="157" fill="#e6edf3" style="opacity:0;animation:o4 22.00s linear infinite"><tspan fill="#d97757">◆ </tspan><tspan fill="#7d8590">diary     </tspan><tspan fill="#e6edf3" fill-opacity="0.82">today: ACME-405 PR review · yesterday: ACME-412 retry · last week: ACME-398 flaky e2e</tspan></text>

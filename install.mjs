@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Installs claude-memory into a Claude Code config dir (~/.claude or $CLAUDE_CONFIG_DIR).
+ * Installs elephant-memory into a Claude Code config dir (~/.claude or $CLAUDE_CONFIG_DIR).
  * Works on Linux, macOS and Windows; safe to run again (it replaces its own hooks, never others).
  *
  *   node install.mjs [options]
@@ -252,7 +252,7 @@ const install = () => {
 
     const bin = tilde(join(TARGET, 'bin'));
     say(`
-✓ claude-memory installed into ${tilde(TARGET)}
+✓ elephant-memory installed into ${tilde(TARGET)}
   hooks:      ${[...features].join(', ')} → ${tilde(SETTINGS)} (backup next to it)
   skills:     /wrap, /sleep → ${tilde(join(CLAUDE_HOME, 'skills'))}
   CLAUDE.md:  ${opts['no-claude-md'] ? 'skipped' : `memory conventions block in ${tilde(CLAUDE_MD)}`}
@@ -283,7 +283,7 @@ const uninstall = () => {
             rmSync(join(state, name), { recursive: true, force: true });
         }
     }
-    say(`✓ claude-memory removed. Memory notes and diaries in ${tilde(join(CLAUDE_HOME, 'projects'))}/*/ are untouched.`);
+    say(`✓ elephant-memory removed. Memory notes and diaries in ${tilde(join(CLAUDE_HOME, 'projects'))}/*/ are untouched.`);
 };
 
 if (opts.help) {

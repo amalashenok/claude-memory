@@ -1,6 +1,6 @@
 # Memory format
 
-claude-memory reads and writes plain Markdown under the Claude Code config dir (`~/.claude` or `$CLAUDE_CONFIG_DIR`). Nothing here needs a database: delete the search cache and it is rebuilt.
+elephant-memory reads and writes plain Markdown under the Claude Code config dir (`~/.claude` or `$CLAUDE_CONFIG_DIR`). Nothing here needs a database: delete the search cache and it is rebuilt.
 
 ## Layout
 

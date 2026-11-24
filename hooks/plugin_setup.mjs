@@ -6,7 +6,7 @@
  *   at this plugin copy: the skills and the memory conventions call the tools by that path.
  * - Prints the memory conventions (snippets/CLAUDE.md) as session context, unless CLAUDE.md
  *   already has them from the script installer.
- * - Warns when Node.js is too old or claude-memory is also installed by the script (hooks run twice).
+ * - Warns when Node.js is too old or elephant-memory is also installed by the script (hooks run twice).
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,11 +35,11 @@ const conventions = () => {
 await runHook(() => {
     const out = [];
     if (nodeTooOld()) {
-        out.push(`claude-memory: Node.js >= ${MIN_NODE.join('.')} is required, the hooks run with ${process.versions.node}. Tell the user to update the \`node\` on PATH.`);
+        out.push(`elephant-memory: Node.js >= ${MIN_NODE.join('.')} is required, the hooks run with ${process.versions.node}. Tell the user to update the \`node\` on PATH.`);
     }
     const scriptInstalled = existsSync(join(INSTALL_DIR, 'hooks'));
     if (scriptInstalled) {
-        out.push('claude-memory is installed both as a plugin and by install.mjs, so its hooks run twice. Tell the user to keep one: `node install.mjs --uninstall` in the repo clone, or `/plugin uninstall elephant-memory`.');
+        out.push('elephant-memory is installed both as a plugin and by install.mjs, so its hooks run twice. Tell the user to keep one: `node install.mjs --uninstall` in the repo clone, or `/plugin uninstall elephant-memory`.');
     } else {
         const bin = join(INSTALL_DIR, 'bin');
         writeShim(bin, 'memsearch', process.execPath, join(ROOT, 'memsearch', 'memsearch.ts'), '--no-warnings ');

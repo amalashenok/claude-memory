@@ -1,5 +1,5 @@
 #!/bin/sh
-# Linux / macOS / Git Bash: installs claude-memory with Node.js >= 22.18.
+# Linux / macOS / Git Bash: installs elephant-memory with Node.js >= 22.18.
 # Set NODE=/path/to/node when the default `node` is older. All options go to install.mjs (see --help).
 set -eu
 DIR=$(cd "$(dirname "$0")" && pwd)

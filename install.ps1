@@ -1,4 +1,4 @@
-# Windows PowerShell: installs claude-memory with Node.js >= 22.18.
+# Windows PowerShell: installs elephant-memory with Node.js >= 22.18.
 # Set $env:NODE to a node.exe path when the default `node` is older. All arguments go to install.mjs (see --help).
 #   powershell -ExecutionPolicy Bypass -File .\install.ps1 [--no-live] [--uninstall] ...
 $ErrorActionPreference = 'Stop'

@@ -1,4 +1,4 @@
-## Memory (claude-memory)
+## Memory (elephant-memory)
 
 Three layers: the `MEMORY.md` index (rules, references, sub-indexes) → sub-indexes `index_*.md` → the session diary in `~/.claude/projects/<slug>/digests/`.
 

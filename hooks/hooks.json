@@ -1,5 +1,5 @@
 {
-  "description": "claude-memory hooks (plugin install)",
+  "description": "elephant-memory hooks (plugin install)",
   "hooks": {
     "SessionStart": [
       {

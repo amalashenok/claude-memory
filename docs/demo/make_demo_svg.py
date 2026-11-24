@@ -4,7 +4,7 @@
 Usage: python3 docs/demo/make_demo_svg.py docs/demo/answer.txt docs/demo.svg [--static]
 
 answer.txt is the verbatim reply of `claude -p --model sonnet "Morning! Where did we stop, and what's next?"`
-in the demo project built from examples/memory, with only the claude-memory SessionStart hooks enabled.
+in the demo project built from examples/memory, with only the elephant-memory SessionStart hooks enabled.
 """
 import html
 import re
@@ -42,7 +42,7 @@ def add(kind, text, gap=0.08, typed=False):
 
 
 add('cmd', '$ claude', 1.2, typed=True)
-add('hdr', 'claude-memory · context loaded at session start', 0.25)
+add('hdr', 'elephant-memory · context loaded at session start', 0.25)
 ctx = [
     ('snapshot', 'branch ACME-412-checkout-retry · last commit 0d9398a · uncommitted: checkout/pay.js, test/'),
     ('last time', '“Now run the tests please” → “All 12 tests pass. Next: a load test in staging”'),
