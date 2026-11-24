@@ -21,11 +21,16 @@ Nobody wrote that answer down for Claude. It comes from a snapshot of where the 
 - 🔎 **Finds anything**: `memsearch` searches every note and diary entry across projects, by words or by meaning.
 - 🧹 **Tidies itself up**: `/sleep` merges duplicate notes, fixes stale facts and learns your vocabulary.
 
-No server, no cloud, no database to look after: plain Markdown in `~/.claude`, a few hooks, and a one-command install on Linux, macOS and Windows.
+No server, no cloud, no database to look after: plain Markdown in `~/.claude`, a few hooks, and a two-line install on Linux, macOS and Windows.
 
-```sh
-git clone https://github.com/amalashenok/claude-memory.git && cd claude-memory && ./install.sh
+In Claude Code:
+
 ```
+/plugin marketplace add amalashenok/claude-memory
+/plugin install elephant-memory@elephant-memory
+```
+
+Or ask Claude: *"Install claude-memory from github.com/amalashenok/claude-memory"*: the [steps for agents](#for-ai-agents) below are written for it. Other ways: [install script](#install-script), [skills only](#skills-only-skillssh).
 
 ## Before and after
 
@@ -81,6 +86,32 @@ flowchart LR
 
 ## Install
 
+Pick one way. The plugin and the install script give the same hooks and tools; don't use both, or every hook runs twice (the plugin warns about it at session start).
+
+### Plugin (recommended)
+
+In a Claude Code session:
+
+```
+/plugin marketplace add amalashenok/claude-memory
+/plugin install elephant-memory@elephant-memory
+```
+
+The same from a shell: `claude plugin marketplace add amalashenok/claude-memory && claude plugin install elephant-memory@elephant-memory`. Restart Claude Code sessions afterwards.
+
+The plugin is named `elephant-memory` because Claude Code reserves plugin names that start with `claude-`. Compared with the install script:
+
+- every feature is on (diary, live registry); for `--no-diary` or `--no-live`, use the install script;
+- `memsearch` does full-text search only; `--hybrid` needs the embedding runtime that the install script sets up with npm;
+- the skills are namespaced: `/elephant-memory:wrap` and `/elephant-memory:sleep`;
+- the memory conventions are added to the session context at start instead of to `~/.claude/CLAUDE.md`;
+- at session start the plugin writes the `memsearch` and `claude-memory` launchers to `~/.claude/claude-memory/bin/`, pointing at the installed plugin copy;
+- the hooks run `node` from `PATH`, so it must be Node.js ≥ 22.18.
+
+Update: `claude plugin marketplace update elephant-memory && claude plugin update elephant-memory@elephant-memory`. Remove: `claude plugin uninstall elephant-memory@elephant-memory` and delete `~/.claude/claude-memory/`. Your memory notes and diaries stay.
+
+### Install script
+
 ```sh
 git clone https://github.com/amalashenok/claude-memory.git
 cd claude-memory
@@ -111,6 +142,37 @@ Running it again updates the installation in place. Restart Claude Code sessions
 | `--uninstall` | remove hooks, tools, unmodified skills and the `CLAUDE.md` block. Your memory notes and diaries are never touched |
 
 `CLAUDE_CONFIG_DIR` is respected if you keep Claude Code's config somewhere other than `~/.claude`.
+
+
+### Skills only (skills.sh)
+
+```sh
+npx skills add amalashenok/claude-memory
+```
+
+This installs only `/wrap` and `/sleep`. They call the claude-memory tools and rely on its hooks, so install the plugin or run the install script as well; without them the skills stop and say so.
+
+## For AI agents
+
+Steps for an agent asked to install claude-memory for its user. Run them one by one and report what happened.
+
+1. **Check Node.js:** `node --version` must be ≥ 22.18. If it is older, stop and tell the user. The install script can also use another binary with `--node <path>`.
+2. **Check for an existing install:** `claude plugin list` shows `elephant-memory`, or the directory `~/.claude/claude-memory/hooks/` exists (install script). If either is present, update that one instead of adding the other.
+3. **Ask the user one question:** the session diary sends a condensed transcript of each session (prompts and answers, no tool output) to a small model through their own `claude -p`. Do they want it? If not, use the install script with `--no-diary`.
+4. **Install.** Plugin, without prompts:
+   ```sh
+   claude plugin marketplace add amalashenok/claude-memory
+   claude plugin install elephant-memory@elephant-memory
+   ```
+   Install script: clone to a durable place (not a temp dir; the hooks run from `~/.claude/claude-memory/`, but updates are run from the clone), then run it:
+   ```sh
+   git clone https://github.com/amalashenok/claude-memory.git ~/claude-memory
+   node ~/claude-memory/install.mjs            # add --no-diary, --no-live, --no-embeddings as the user chose
+   ```
+5. **Verify:** `~/.claude/claude-memory/bin/memsearch lint` exits 0. For the install script, `~/.claude/settings.json` has hooks whose command contains `claude-memory/hooks/`. The plugin writes its launchers at the first session start after install, so for the plugin this check passes only after a restart.
+6. **Tell the user:** restart Claude Code sessions to load the hooks. Memory builds up from the next session; `/wrap` before `/clear`, `/sleep` now and then (`/elephant-memory:wrap` and `/elephant-memory:sleep` with the plugin).
+
+Never edit or delete `~/.claude/projects/*/memory/` or `digests/`: they are the user's memory. To remove claude-memory: `claude plugin uninstall elephant-memory@elephant-memory` and delete `~/.claude/claude-memory/`, or `node install.mjs --uninstall` from the clone.
 
 ## Usage
 
@@ -184,6 +246,8 @@ Your memory directories hold whatever you worked on, so don't commit or share `~
 | `memsearch/memsearch.ts` | — | SQLite FTS5 (trigram) index, optional embeddings, `ls`, `lint` |
 | `tools/claude-memory.mjs` | — | `save-wrap`, `live`, `registry`, `catchup` |
 | `skills/wrap`, `skills/sleep` | — | the two skills |
+| `hooks/plugin_setup.mjs` | SessionStart (plugin only) | launchers in `~/.claude/claude-memory/bin/`, memory conventions as context |
+| `.claude-plugin/`, `hooks/hooks.json` | — | plugin manifest, marketplace entry and the plugin's hook list |
 
 The terminal window is identified by the Claude Code process ID, which survives `/clear` while the session ID does not. That's how a hand-off reaches the right window when several sessions are open in the same project. If the process tree can't be read, hand-offs fall back to the project.
 

@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { posix } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -308,8 +309,18 @@ const ftsSearch = (db: DatabaseSync, words: string[], filters: Filters, limit: n
 
 type Embedder = (texts: string[], prefix: string) => Promise<Float32Array[]>;
 
+/** The embedding runtime is an optional npm dependency: the plugin install and `--no-embeddings` go without it. */
+const loadTransformers = async () => {
+  try {
+    return await import('@huggingface/transformers');
+  } catch {
+    const dir = fileURLToPath(new URL('.', import.meta.url));
+    return fail(`--sem and --hybrid need the embedding runtime: run \`npm install --omit=dev\` in ${dir}, or install claude-memory with install.mjs`);
+  }
+};
+
 const loadEmbedder = async (): Promise<Embedder> => {
-  const { pipeline, env } = await import('@huggingface/transformers');
+  const { pipeline, env } = await loadTransformers();
   env.cacheDir = MODEL_CACHE;
   const extractor: any = await pipeline('feature-extraction', MODEL, { dtype: 'fp32' });
   return async (texts, prefix) => {

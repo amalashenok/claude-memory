@@ -1,0 +1,13 @@
+{
+  "name": "elephant-memory",
+  "owner": { "name": "amalashenok", "url": "https://github.com/amalashenok" },
+  "metadata": { "description": "Long-term memory for Claude Code" },
+  "plugins": [
+    {
+      "name": "elephant-memory",
+      "source": "./",
+      "description": "Where-we-stopped snapshots, an automatic session diary, active tasks, parallel-session awareness, memsearch, /wrap and /sleep.",
+      "category": "productivity"
+    }
+  ]
+}

@@ -3,7 +3,7 @@
  * Plain Node.js (no dependencies), works on Linux, macOS and Windows.
  */
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -12,6 +12,8 @@ export const CLAUDE_HOME = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.cl
 export const STATE_DIR = join(CLAUDE_HOME, 'state');
 export const PROJECTS_DIR = join(CLAUDE_HOME, 'projects');
 export const LOG_FILE = join(STATE_DIR, 'claude-memory.log');
+/** Where the script installer puts hooks and tools; the launchers in its bin/ are what skills call. */
+export const INSTALL_DIR = join(CLAUDE_HOME, 'claude-memory');
 
 const NOISE_RE = /<command-name>|<local-command|<system-reminder>|<task-notification>|Caveat: The messages below/;
 const CLAUDE_CMD_RE = /@anthropic-ai[\\/]claude-code|(^|[\\/\s"])claude(\.exe|\.cmd|\.js)?("|\s|$)/i;
@@ -53,6 +55,36 @@ export const readStdin = () => {
         return readFileSync(0, 'utf8');
     } catch {
         return '';
+    }
+};
+
+const slash = (path) => path.replaceAll('\\', '/');
+
+/** Writes `path` only when its content differs; returns whether it wrote. */
+const writeIfChanged = (path, text) => {
+    if (existsSync(path) && readFileSync(path, 'utf8') === text) {
+        return false;
+    }
+    writeFileSync(path, text);
+    return true;
+};
+
+/**
+ * Writes a launcher `<binDir>/<name>` (plus `<name>.cmd` on Windows) that runs `script` with `node`.
+ * @param {string} binDir
+ * @param {string} name
+ * @param {string} node
+ * @param {string} script
+ * @param {string} [extraArgs] node flags, each followed by a space
+ */
+export const writeShim = (binDir, name, node, script, extraArgs = '') => {
+    mkdirSync(binDir, { recursive: true });
+    const posix = join(binDir, name);
+    if (writeIfChanged(posix, `#!/bin/sh\nexec "${slash(node)}" ${extraArgs}"${slash(script)}" "$@"\n`)) {
+        chmodSync(posix, 0o755);
+    }
+    if (IS_WINDOWS) {
+        writeIfChanged(`${posix}.cmd`, `@echo off\r\n"${node}" ${extraArgs}"${script}" %*\r\n`);
     }
 };
 

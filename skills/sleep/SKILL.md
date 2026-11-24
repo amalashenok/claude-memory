@@ -7,6 +7,10 @@ description: "Sleep-time consolidation of project memory: tidies the memory note
 
 This is the agent's "sleep": a quiet pass over what the project has accumulated. It is housekeeping, not new work. Do not touch project code, do not commit, and keep the final report to 5–8 lines.
 
+## Requirement
+
+This skill needs claude-memory's hooks and tools. If `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/claude-memory/bin/claude-memory` does not exist (for example, only the skill was installed with `npx skills`), stop and tell the user to install claude-memory first: in Claude Code, `/plugin marketplace add amalashenok/claude-memory`, then `/plugin install elephant-memory@elephant-memory`; or see https://github.com/amalashenok/claude-memory#install.
+
 ## 0. Resolve paths (do not ask the user)
 
 ```bash

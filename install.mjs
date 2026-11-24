@@ -13,14 +13,14 @@
  *   --node <path>      Node.js binary the hooks run with (default: the one running this script)
  */
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { writeShim } from './hooks/lib.mjs';
 
 const MIN_NODE = [22, 18];
-const IS_WINDOWS = process.platform === 'win32';
 const REPO = dirname(fileURLToPath(import.meta.url));
 const CLAUDE_HOME = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 const TARGET = join(CLAUDE_HOME, 'claude-memory');
@@ -156,17 +156,6 @@ const addOurHooks = (settings, node, features) => {
     return settings;
 };
 
-const writeShim = (name, node, script, extraArgs = '') => {
-    const bin = join(TARGET, 'bin');
-    mkdirSync(bin, { recursive: true });
-    const posix = join(bin, name);
-    writeFileSync(posix, `#!/bin/sh\nexec "${slash(node)}" ${extraArgs}"${slash(script)}" "$@"\n`);
-    chmodSync(posix, 0o755);
-    if (IS_WINDOWS) {
-        writeFileSync(`${posix}.cmd`, `@echo off\r\n"${node}" ${extraArgs}"${script}" %*\r\n`);
-    }
-};
-
 /** Skill text with ~/.claude replaced by the real config dir. */
 const renderSkillFile = (text) => text.replaceAll('~/.claude/', `${tilde(CLAUDE_HOME)}/`);
 
@@ -243,8 +232,8 @@ const install = () => {
     for (const file of ['memsearch.ts', 'package.json', 'tsconfig.json']) {
         cpSync(join(REPO, 'memsearch', file), join(TARGET, 'memsearch', file));
     }
-    writeShim('memsearch', node, join(TARGET, 'memsearch', 'memsearch.ts'), '--no-warnings ');
-    writeShim('claude-memory', node, join(TARGET, 'tools', 'claude-memory.mjs'));
+    writeShim(join(TARGET, 'bin'), 'memsearch', node, join(TARGET, 'memsearch', 'memsearch.ts'), '--no-warnings ');
+    writeShim(join(TARGET, 'bin'), 'claude-memory', node, join(TARGET, 'tools', 'claude-memory.mjs'));
 
     let embeddings = false;
     if (!opts['no-embeddings']) {

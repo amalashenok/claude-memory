@@ -264,3 +264,50 @@ describe('installer', () => {
         assert.equal(readFileSync(join(target, 'CLAUDE.md'), 'utf8'), '# My rules\n');
     });
 });
+
+describe('plugin', () => {
+    let target;
+    const setup = () => run(join(HOOKS, 'plugin_setup.mjs'), [], {}, { CLAUDE_CONFIG_DIR: target });
+
+    before(() => {
+        target = mkdtempSync(join(tmpdir(), 'cm-plugin-'));
+    });
+    after(() => rmSync(target, { recursive: true, force: true }));
+
+    test('hooks.json runs only scripts that exist, through CLAUDE_PLUGIN_ROOT', () => {
+        const { hooks } = JSON.parse(readFileSync(join(HOOKS, 'hooks.json'), 'utf8'));
+        const commands = Object.values(hooks).flat().flatMap((g) => g.hooks).map((h) => h.command);
+        assert.ok(commands.length >= 11);
+        for (const command of commands) {
+            const [, script] = command.match(/^node "\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/([\w.]+)"/) ?? [];
+            assert.ok(script && existsSync(join(HOOKS, script)), command);
+        }
+    });
+
+    test('manifest and marketplace name the same plugin', () => {
+        const plugin = JSON.parse(readFileSync(join(REPO, '.claude-plugin', 'plugin.json'), 'utf8'));
+        const market = JSON.parse(readFileSync(join(REPO, '.claude-plugin', 'marketplace.json'), 'utf8'));
+        assert.deepEqual(market.plugins.map((p) => [p.name, p.source]), [[plugin.name, './']]);
+    });
+
+    test('setup writes launchers to this copy and prints the conventions', () => {
+        const out = setup();
+        assert.match(out, /## Memory \(claude-memory\)/);
+        const launcher = readFileSync(join(target, 'claude-memory', 'bin', 'memsearch'), 'utf8');
+        assert.ok(launcher.includes(join(REPO, 'memsearch', 'memsearch.ts').replaceAll('\\', '/')));
+        const help = spawnSync(process.execPath, ['--no-warnings', join(REPO, 'tools', 'claude-memory.mjs'), 'help'], { encoding: 'utf8', env: { ...env, CLAUDE_CONFIG_DIR: target } });
+        assert.equal(help.status, 0, help.stderr);
+    });
+
+    test('setup stays quiet about conventions already in CLAUDE.md', () => {
+        writeFileSync(join(target, 'CLAUDE.md'), '<!-- claude-memory:start -->\n<!-- claude-memory:end -->\n');
+        assert.doesNotMatch(setup(), /## Memory/);
+    });
+
+    test('setup warns about a second, script-based install and leaves it alone', () => {
+        mkdirSync(join(target, 'claude-memory', 'hooks'), { recursive: true });
+        rmSync(join(target, 'claude-memory', 'bin'), { recursive: true, force: true });
+        assert.match(setup(), /hooks run twice/);
+        assert.ok(!existsSync(join(target, 'claude-memory', 'bin')));
+    });
+});
