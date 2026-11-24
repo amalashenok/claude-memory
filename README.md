@@ -54,28 +54,25 @@ Claude Code already keeps a per-project memory directory (`~/.claude/projects/<p
 - **Search.** `memsearch` does full-text search over notes and diaries, with optional local embeddings (`--hybrid`), queries by ticket, age or type, and lints broken links and orphaned notes.
 - **`/wrap` and `/sleep`.** `/wrap` saves a rich summary from the model's full context before `/clear`. `/sleep` consolidates memory: merges duplicates, fixes stale facts and broken links, learns the user's terms.
 
-Everything is plain Markdown files on your disk. There is no server and no database you have to keep: the search index is a disposable cache.
-
 ```mermaid
 flowchart LR
-    subgraph session[Claude Code session]
-        start([SessionStart]) --> work[prompts and tool calls] --> stop([Stop / SessionEnd])
-    end
-    snap[(state/last-session-*.md)]
-    diary[(digests/days, weeks, months)]
-    notes[(memory/*.md + MEMORY.md)]
-    live[(state/live/sessions)]
-    stop -- session_snapshot --> snap
-    stop -- episodic_memory: claude -p --> diary
-    work -- live_sessions --> live
-    snap -- session_resume_hint --> start
-    diary -- episodic_memory recall --> start
-    notes -- active_tasks --> start
-    live -- live_sessions start --> start
-    wrap[/wrap/] --> notes & diary
-    sleep[/sleep/] --> notes
-    memsearch{{memsearch}} -.reads.-> notes & diary
+    A[Session ends] -->|snapshot, diary entry| F[(Markdown files<br/>in ~/.claude)]
+    W[You and Claude:<br/>notes, /wrap, /sleep] --> F
+    F -->|where we stopped, diary,<br/>active tasks| B[Next session starts]
 ```
+
+### Where it is stored
+
+| What | Where | Format | Written | Read |
+|---|---|---|---|---|
+| Notes and the `MEMORY.md` index | `~/.claude/projects/<project>/memory/` | Markdown | by Claude during work, `/wrap`, `/sleep` | `MEMORY.md` by Claude Code itself; active tasks by a hook at session start |
+| Session diary | `…/<project>/digests/days`, `weeks`, `months` | Markdown | at session end, by a small model in the background | at session start: today, the last working day, last week's loose ends |
+| `/wrap` summaries | `…/<project>/digests/wraps/`, `~/.claude/state/wrap-<window>.md` | Markdown | by `/wrap` | right after `/clear`, in the same window |
+| Snapshot "where we stopped" | `~/.claude/state/last-session-<project>.md` | Markdown | after every answer and at session end | at the next session start in the project |
+| Live registry of sessions | `~/.claude/state/live/` | JSON files | at session start, on every prompt and tool call, at session end | at session start; `claude-memory live` |
+| Search index | `~/.cache/memsearch/` | SQLite | by `memsearch`, when files have changed | by `memsearch` |
+
+There is no database server: no MySQL, no Redis, nothing running in the background. The SQLite file is a cache; delete it and `memsearch` rebuilds it from the Markdown files.
 
 ## Requirements
 
