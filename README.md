@@ -1,6 +1,35 @@
 # claude-memory
 
-Long-term memory for [Claude Code](https://docs.claude.com/en/docs/claude-code) that survives `/clear`, restarts and parallel sessions.
+[![tests](https://github.com/amalashenok/claude-memory/actions/workflows/tests.yml/badge.svg)](https://github.com/amalashenok/claude-memory/actions/workflows/tests.yml)
+
+**[Claude Code](https://docs.claude.com/en/docs/claude-code) forgets everything when you `/clear`, restart or open a second window. claude-memory makes it pick up where you left off.**
+
+Come back after lunch, open a new session, and instead of re-explaining the task you find that Claude already knows:
+
+- which branch you are on and what is uncommitted;
+- what you asked last and where its answer stopped;
+- what you did today and on your last working day;
+- which tasks are in progress, and the next step for each;
+- what your other Claude windows are doing right now.
+
+There is no server, no cloud and no database to look after. It is plain Markdown in `~/.claude`, a few hooks, and a one-command install on Linux, macOS and Windows:
+
+```sh
+git clone https://github.com/amalashenok/claude-memory.git && cd claude-memory && ./install.sh
+```
+
+## Why
+
+| Without | With claude-memory |
+|---|---|
+| `/clear` wipes the context and you explain the task again | the next session starts from a snapshot of where you stopped, plus your own `/wrap` summary |
+| "What did I do yesterday?" means scrolling through old transcripts | an automatic diary: 2–4 lines per session, rolled up by week and by month |
+| task status lives in your head | notes marked `status: active` are listed at every session start, with the next step |
+| two Claude windows quietly edit the same file | a live registry shows the other sessions and warns about edits to the same file |
+| memory notes pile up, go stale and contradict each other | `/sleep` merges duplicates and fixes stale facts and broken links; `memsearch lint` catches the rest |
+| "I'm sure we wrote that down somewhere" | `memsearch` finds it across all projects, by words or by meaning |
+
+## What you get
 
 Claude Code already keeps a per-project memory directory (`~/.claude/projects/<project>/memory/` with a `MEMORY.md` index). claude-memory builds on it with hooks, two skills and a search tool:
 
