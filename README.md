@@ -2,23 +2,32 @@
 
 [![tests](https://github.com/amalashenok/claude-memory/actions/workflows/tests.yml/badge.svg)](https://github.com/amalashenok/claude-memory/actions/workflows/tests.yml)
 
-**[Claude Code](https://docs.claude.com/en/docs/claude-code) forgets everything when you `/clear`, restart or open a second window. claude-memory makes it pick up where you left off.**
+### Your Claude Code has the memory of a goldfish. Give it an elephant's.
 
-Come back after lunch, open a new session, and instead of re-explaining the task you find that Claude already knows:
+Every `/clear`, every restart, every new window, and [Claude Code](https://docs.claude.com/en/docs/claude-code) starts from zero. You explain the task again, paste the branch name again, remind it what you decided yesterday. claude-memory ends that. Open a session and just ask:
 
-- which branch you are on and what is uncommitted;
-- what you asked last and where its answer stopped;
-- what you did today and on your last working day;
-- which tasks are in progress, and the next step for each;
-- what your other Claude windows are doing right now.
+<p align="center">
+  <img src="docs/demo.svg" alt="A new Claude Code session answers 'Where did we stop, and what's next?' with the branch, uncommitted files, tests, the next step and side tasks" width="900">
+</p>
 
-There is no server, no cloud and no database to look after. It is plain Markdown in `~/.claude`, a few hooks, and a one-command install on Linux, macOS and Windows:
+<sub>A real answer from Claude on the fictional demo project from <a href="examples/memory">examples/</a>. The lines under “context loaded” are a condensed view of what the hooks hand to Claude at session start.</sub>
+
+Nobody wrote that answer down for Claude. It comes from a snapshot of where the last session stopped, a work diary that writes itself, your notes on tasks in progress, and even your own rule about small pull requests.
+
+- 🧭 **Picks up where you left off**: branch, uncommitted files, your last prompts and where the answer stopped, even right after `/clear`.
+- 📓 **Keeps a work diary for you**: 2–4 lines per session, rolled up into weeks and months. "What did I do on Tuesday?" now has an answer.
+- 📌 **Remembers what's in progress**: active tasks and their next step, shown at the start of every session.
+- 👀 **Knows about your other windows**: shows what parallel Claude sessions are doing and warns before two of them edit the same file.
+- 🔎 **Finds anything**: `memsearch` searches every note and diary entry across projects, by words or by meaning.
+- 🧹 **Tidies itself up**: `/sleep` merges duplicate notes, fixes stale facts and learns your vocabulary.
+
+No server, no cloud, no database to look after: plain Markdown in `~/.claude`, a few hooks, and a one-command install on Linux, macOS and Windows.
 
 ```sh
 git clone https://github.com/amalashenok/claude-memory.git && cd claude-memory && ./install.sh
 ```
 
-## Why
+## Before and after
 
 | Without | With claude-memory |
 |---|---|
@@ -29,7 +38,7 @@ git clone https://github.com/amalashenok/claude-memory.git && cd claude-memory &
 | memory notes pile up, go stale and contradict each other | `/sleep` merges duplicates and fixes stale facts and broken links; `memsearch lint` catches the rest |
 | "I'm sure we wrote that down somewhere" | `memsearch` finds it across all projects, by words or by meaning |
 
-## What you get
+## Under the hood
 
 Claude Code already keeps a per-project memory directory (`~/.claude/projects/<project>/memory/` with a `MEMORY.md` index). claude-memory builds on it with hooks, two skills and a search tool:
 

@@ -1,0 +1,19 @@
+Morning! Here's where we are on **ACME-412** (checkout timeout on slow payment provider):
+
+**Done**
+- Branch `ACME-412-checkout-retry`: payment retries once with the same idempotency key (commit `0d9398a`).
+- All 12 tests passed last session.
+
+**Uncommitted**
+- Changes in `checkout/pay.js` and a new `test/` directory are still not committed.
+
+**Next**
+1. Commit the pending `pay.js` changes and `test/` (worth a quick look at the diff first, since the last commit already covers the retry).
+2. Run the load test in staging.
+3. Open the PR, keeping it small and single-concern per your working rules.
+
+**Side items**
+- ACME-405: PR #231 (refund webhook) is waiting on the author's fixes for the missing signature check, then you approve.
+- ACME-398: flaky cart e2e test is still not reproduced.
+
+Want me to start by showing the diff of `checkout/pay.js`?
