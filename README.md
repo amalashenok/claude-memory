@@ -43,6 +43,16 @@ Or ask Claude: *"Install elephant-memory from github.com/amalashenok/elephant-me
 | memory notes pile up, go stale and contradict each other | `/sleep` merges duplicates and fixes stale facts and broken links; `memsearch lint` catches the rest |
 | "I'm sure we wrote that down somewhere" | `memsearch` finds it across all projects, by words or by meaning |
 
+## How it differs from other memory plugins
+
+Most memory plugins for Claude Code save a summary when a session ends and inject it when the next one starts. elephant-memory does that too, and adds:
+
+- **Parallel sessions**: a live registry of your other Claude Code windows, with a warning before two of them edit the same file.
+- **Active tasks from note fields**: `status: active` and `next` in a note's frontmatter, not task lines kept in the index by hand.
+- **Memory that tidies itself**: `/sleep` merges duplicates, fixes stale facts and broken links, and `memsearch lint` checks the rest.
+- **A diary rolled up by week and month**, with last week's loose ends shown at session start.
+- **Built on Claude Code's own memory** (`MEMORY.md` and the project memory directory), not a separate store beside it.
+
 ## Under the hood
 
 Claude Code already keeps a per-project memory directory (`~/.claude/projects/<project>/memory/` with a `MEMORY.md` index). elephant-memory builds on it with hooks, two skills and a search tool:
