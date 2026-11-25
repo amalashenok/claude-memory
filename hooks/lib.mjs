@@ -11,9 +11,9 @@ export const IS_WINDOWS = process.platform === 'win32';
 export const CLAUDE_HOME = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 export const STATE_DIR = join(CLAUDE_HOME, 'state');
 export const PROJECTS_DIR = join(CLAUDE_HOME, 'projects');
-export const LOG_FILE = join(STATE_DIR, 'claude-memory.log');
+export const LOG_FILE = join(STATE_DIR, 'elephant-memory.log');
 /** Where the script installer puts hooks and tools; the launchers in its bin/ are what skills call. */
-export const INSTALL_DIR = join(CLAUDE_HOME, 'claude-memory');
+export const INSTALL_DIR = join(CLAUDE_HOME, 'elephant-memory');
 
 const NOISE_RE = /<command-name>|<local-command|<system-reminder>|<task-notification>|Caveat: The messages below/;
 const CLAUDE_CMD_RE = /@anthropic-ai[\\/]claude-code|(^|[\\/\s"])claude(\.exe|\.cmd|\.js)?("|\s|$)/i;
@@ -211,7 +211,7 @@ const isClaudeProcess = ({ name, cmd }) => {
     if (/^claude(\.exe)?$/i.test(name)) {
         return true;
     }
-    return /^node(\.exe)?$/i.test(name) && CLAUDE_CMD_RE.test(cmd) && !cmd.includes('claude-memory');
+    return /^node(\.exe)?$/i.test(name) && CLAUDE_CMD_RE.test(cmd) && !cmd.includes('elephant-memory');
 };
 
 /**

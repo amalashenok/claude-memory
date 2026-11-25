@@ -9,7 +9,7 @@ This is the agent's "sleep": a quiet pass over what the project has accumulated.
 
 ## Requirement
 
-This skill needs elephant-memory's hooks and tools. If `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/claude-memory/bin/claude-memory` does not exist (for example, only the skill was installed with `npx skills`), stop and tell the user to install elephant-memory first: in Claude Code, `/plugin marketplace add amalashenok/elephant-memory`, then `/plugin install elephant-memory@elephant-memory`; or see https://github.com/amalashenok/elephant-memory#install.
+This skill needs elephant-memory's hooks and tools. If `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/elephant-memory/bin/elephant-memory` does not exist (for example, only the skill was installed with `npx skills`), stop and tell the user to install elephant-memory first: in Claude Code, `/plugin marketplace add amalashenok/elephant-memory`, then `/plugin install elephant-memory@elephant-memory`; or see https://github.com/amalashenok/elephant-memory#install.
 
 ## 0. Resolve paths (do not ask the user)
 
@@ -20,7 +20,7 @@ ROOT="$CLAUDE_HOME/projects/$SLUG"
 MEM="$ROOT/memory"                               # notes + MEMORY.md
 DIGESTS="$ROOT/digests"                          # session diary
 LATEST=$(ls -t "$ROOT"/*.jsonl 2>/dev/null | head -1)   # transcript of the current or last session
-TOOLS="$CLAUDE_HOME/claude-memory/bin"
+TOOLS="$CLAUDE_HOME/elephant-memory/bin"
 ```
 
 If `$MEM` does not exist, there is no memory yet: skip steps 1–2 and 2a.
@@ -73,7 +73,7 @@ If nothing new came up, write nothing. An empty pass is fine.
 
 The `episodic_memory` hook keeps the diary: an entry per session in `$DIGESTS/days/YYYY-MM-DD/<session id>.md`, roll-ups in `$DIGESTS/weeks/` and `$DIGESTS/months/`. Do not write diary entries here.
 
-Only check that today's sessions have entries. If some are missing, run `$TOOLS/claude-memory catchup "$(pwd)"`.
+Only check that today's sessions have entries. If some are missing, run `$TOOLS/elephant-memory catchup "$(pwd)"`.
 
 ## 4. Reconcile task notes
 
@@ -90,7 +90,7 @@ No network-heavy or expensive calls for this step.
 After steps 1–2 regenerate `$MEM/REGISTRY.md`, a table of every note with its tickets and status:
 
 ```bash
-"$TOOLS/claude-memory" registry "$MEM"
+"$TOOLS/elephant-memory" registry "$MEM"
 ```
 
 `REGISTRY.md` is not loaded into the session (only `MEMORY.md` is), so keep it complete. Never edit it by hand: edit the notes and rerun.

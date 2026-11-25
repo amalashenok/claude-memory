@@ -9,7 +9,7 @@
  *   end     SessionEnd: append a short entry to digests/live/<date>.md and drop the session
  *
  * state/live/sessions/<session id>.json   one file per session; a session idle for TTL is considered gone
- * state/live/events.jsonl                 append-only event stream (`claude-memory live watch`)
+ * state/live/events.jsonl                 append-only event stream (`elephant-memory live watch`)
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -122,7 +122,7 @@ const main = () => {
         publish('start', sid, project);
         const others = liveSessions(sid).slice(0, OTHERS_SHOWN);
         if (others.length) {
-            console.log(`Parallel Claude sessions (live registry, \`claude-memory live list\`):\n${others.map((o) => describe(o, now)).join('\n')}`);
+            console.log(`Parallel Claude sessions (live registry, \`elephant-memory live list\`):\n${others.map((o) => describe(o, now)).join('\n')}`);
         }
     } else if (mode === 'prompt') {
         const text = squash(String(payload.prompt ?? '')).slice(0, TASK_CHARS);

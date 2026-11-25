@@ -36,7 +36,7 @@ const run = (file, args = [], input = undefined, extraEnv = {}) => {
 };
 
 const hook = (name, args, payload) => run(join(HOOKS, name), args, payload);
-const cli = (args, input) => run(join(REPO, 'tools', 'claude-memory.mjs'), args, input);
+const cli = (args, input) => run(join(REPO, 'tools', 'elephant-memory.mjs'), args, input);
 
 const writeFakeClaude = (dir) => {
     mkdirSync(dir, { recursive: true });
@@ -223,7 +223,7 @@ describe('installer', () => {
     let target;
     const install = (...args) => run(join(REPO, 'install.mjs'), ['--no-embeddings', ...args], undefined, { CLAUDE_CONFIG_DIR: target });
     const settings = () => JSON.parse(readFileSync(join(target, 'settings.json'), 'utf8'));
-    const ourCommands = () => Object.values(settings().hooks ?? {}).flat().flatMap((g) => g.hooks).filter((h) => h.command.includes('claude-memory/hooks/'));
+    const ourCommands = () => Object.values(settings().hooks ?? {}).flat().flatMap((g) => g.hooks).filter((h) => h.command.includes('elephant-memory/hooks/'));
 
     before(() => {
         target = mkdtempSync(join(tmpdir(), 'cm-install-'));
@@ -241,10 +241,10 @@ describe('installer', () => {
         assert.equal(settings().model, 'opus');
         assert.ok(settings().hooks.Stop.some((g) => g.hooks.some((h) => h.command === 'echo mine')));
         assert.ok(existsSync(join(target, 'skills', 'wrap', 'SKILL.md')));
-        assert.ok(existsSync(join(target, 'claude-memory', 'bin', 'memsearch')));
+        assert.ok(existsSync(join(target, 'elephant-memory', 'bin', 'memsearch')));
         const md = readFileSync(join(target, 'CLAUDE.md'), 'utf8');
         assert.match(md, /^# My rules/);
-        assert.equal(md.match(/claude-memory:start/g).length, 1);
+        assert.equal(md.match(/elephant-memory:start/g).length, 1);
     });
 
     test('--no-live and --no-diary leave those hooks out', () => {
@@ -259,9 +259,24 @@ describe('installer', () => {
         assert.equal(ourCommands().length, 0);
         assert.equal(settings().model, 'opus');
         assert.ok(settings().hooks.Stop.some((g) => g.hooks.some((h) => h.command === 'echo mine')));
-        assert.ok(!existsSync(join(target, 'claude-memory')));
+        assert.ok(!existsSync(join(target, 'elephant-memory')));
         assert.ok(!existsSync(join(target, 'skills', 'wrap')));
         assert.equal(readFileSync(join(target, 'CLAUDE.md'), 'utf8'), '# My rules\n');
+    });
+
+    test('install replaces a release installed under the old claude-memory name', () => {
+        const legacyHook = { type: 'command', command: `node "${join(target, 'claude-memory', 'hooks', 'session_snapshot.mjs').replaceAll('\\', '/')}"` };
+        writeFileSync(join(target, 'settings.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [legacyHook] }] } }));
+        writeFileSync(join(target, 'CLAUDE.md'), '# My rules\n\n<!-- claude-memory:start -->\nold\n<!-- claude-memory:end -->\n');
+        mkdirSync(join(target, 'claude-memory', 'hooks'), { recursive: true });
+        install();
+        assert.equal(Object.values(settings().hooks).flat().flatMap((g) => g.hooks).filter((h) => h.command.includes('claude-memory')).length, 0);
+        assert.equal(ourCommands().length, 10);
+        assert.ok(!existsSync(join(target, 'claude-memory')));
+        const md = readFileSync(join(target, 'CLAUDE.md'), 'utf8');
+        assert.doesNotMatch(md, /claude-memory/);
+        assert.equal(md.match(/elephant-memory:start/g).length, 1);
+        install('--uninstall');
     });
 });
 
@@ -293,21 +308,33 @@ describe('plugin', () => {
     test('setup writes launchers to this copy and prints the conventions', () => {
         const out = setup();
         assert.match(out, /## Memory \(elephant-memory\)/);
-        const launcher = readFileSync(join(target, 'claude-memory', 'bin', 'memsearch'), 'utf8');
+        const launcher = readFileSync(join(target, 'elephant-memory', 'bin', 'memsearch'), 'utf8');
         assert.ok(launcher.includes(join(REPO, 'memsearch', 'memsearch.ts').replaceAll('\\', '/')));
-        const help = spawnSync(process.execPath, ['--no-warnings', join(REPO, 'tools', 'claude-memory.mjs'), 'help'], { encoding: 'utf8', env: { ...env, CLAUDE_CONFIG_DIR: target } });
+        const help = spawnSync(process.execPath, ['--no-warnings', join(REPO, 'tools', 'elephant-memory.mjs'), 'help'], { encoding: 'utf8', env: { ...env, CLAUDE_CONFIG_DIR: target } });
         assert.equal(help.status, 0, help.stderr);
     });
 
     test('setup stays quiet about conventions already in CLAUDE.md', () => {
-        writeFileSync(join(target, 'CLAUDE.md'), '<!-- claude-memory:start -->\n<!-- claude-memory:end -->\n');
+        writeFileSync(join(target, 'CLAUDE.md'), '<!-- elephant-memory:start -->\n<!-- elephant-memory:end -->\n');
         assert.doesNotMatch(setup(), /## Memory/);
     });
 
     test('setup warns about a second, script-based install and leaves it alone', () => {
-        mkdirSync(join(target, 'claude-memory', 'hooks'), { recursive: true });
-        rmSync(join(target, 'claude-memory', 'bin'), { recursive: true, force: true });
+        mkdirSync(join(target, 'elephant-memory', 'hooks'), { recursive: true });
+        rmSync(join(target, 'elephant-memory', 'bin'), { recursive: true, force: true });
         assert.match(setup(), /hooks run twice/);
-        assert.ok(!existsSync(join(target, 'claude-memory', 'bin')));
+        assert.ok(!existsSync(join(target, 'elephant-memory', 'bin')));
+        rmSync(join(target, 'elephant-memory'), { recursive: true, force: true });
+    });
+
+    test('setup treats an install under the old claude-memory name the same way', () => {
+        mkdirSync(join(target, 'claude-memory', 'hooks'), { recursive: true });
+        assert.match(setup(), /hooks run twice/);
+        assert.ok(existsSync(join(target, 'claude-memory', 'hooks')));
+        rmSync(join(target, 'claude-memory', 'hooks'), { recursive: true });
+        mkdirSync(join(target, 'claude-memory', 'bin'), { recursive: true });
+        assert.doesNotMatch(setup(), /hooks run twice/);
+        assert.ok(!existsSync(join(target, 'claude-memory')));
+        assert.ok(existsSync(join(target, 'elephant-memory', 'bin', 'memsearch')));
     });
 });

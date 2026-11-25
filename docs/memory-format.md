@@ -23,8 +23,8 @@ elephant-memory reads and writes plain Markdown under the Claude Code config dir
 │   ├── last-session-<project slug>.md
 │   ├── clear-handoff-<window>.md, wrap-<window>.md  consumed by the next session after /clear
 │   ├── live/sessions/<session id>.json, live/events.jsonl
-│   └── claude-memory.log
-└── claude-memory/                      the installed hooks and tools
+│   └── elephant-memory.log
+└── elephant-memory/                      the installed hooks and tools
 ```
 
 ## A note

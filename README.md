@@ -79,7 +79,7 @@ flowchart LR
 | Session diary | `…/<project>/digests/days`, `weeks`, `months` | Markdown | at session end, by a small model in the background | at session start: today, the last working day, last week's loose ends |
 | `/wrap` summaries | `…/<project>/digests/wraps/`, `~/.claude/state/wrap-<window>.md` | Markdown | by `/wrap` | right after `/clear`, in the same window |
 | Snapshot "where we stopped" | `~/.claude/state/last-session-<project>.md` | Markdown | after every answer and at session end | at the next session start in the project |
-| Live registry of sessions | `~/.claude/state/live/` | JSON files | at session start, on every prompt and tool call, at session end | at session start; `claude-memory live` |
+| Live registry of sessions | `~/.claude/state/live/` | JSON files | at session start, on every prompt and tool call, at session end | at session start; `elephant-memory live` |
 | Search index | `~/.cache/memsearch/` | SQLite | by `memsearch`, when files have changed | by `memsearch` |
 
 There is no database server: no MySQL, no Redis, nothing running in the background. The SQLite file is a cache; delete it and `memsearch` rebuilds it from the Markdown files.
@@ -94,8 +94,6 @@ There is no database server: no MySQL, no Redis, nothing running in the backgrou
 ## Install
 
 Pick one way. The plugin and the install script give the same hooks and tools; don't use both, or every hook runs twice (the plugin warns about it at session start).
-
-The tools, launchers and state keep the project's original name on disk: `~/.claude/claude-memory/`, the `claude-memory` command, `claude-memory` markers in `CLAUDE.md`.
 
 ### Plugin (recommended)
 
@@ -114,10 +112,10 @@ Compared with the install script:
 - `memsearch` does full-text search only; `--hybrid` needs the embedding runtime that the install script sets up with npm;
 - the skills are namespaced: `/elephant-memory:wrap` and `/elephant-memory:sleep`;
 - the memory conventions are added to the session context at start instead of to `~/.claude/CLAUDE.md`;
-- at session start the plugin writes the `memsearch` and `claude-memory` launchers to `~/.claude/claude-memory/bin/`, pointing at the installed plugin copy;
+- at session start the plugin writes the `memsearch` and `elephant-memory` launchers to `~/.claude/elephant-memory/bin/`, pointing at the installed plugin copy;
 - the hooks run `node` from `PATH`, so it must be Node.js ≥ 22.18.
 
-Update: `claude plugin marketplace update elephant-memory && claude plugin update elephant-memory@elephant-memory`. Remove: `claude plugin uninstall elephant-memory@elephant-memory` and delete `~/.claude/claude-memory/`. Your memory notes and diaries stay.
+Update: `claude plugin marketplace update elephant-memory && claude plugin update elephant-memory@elephant-memory`. Remove: `claude plugin uninstall elephant-memory@elephant-memory` and delete `~/.claude/elephant-memory/`. Your memory notes and diaries stay.
 
 ### Install script
 
@@ -133,9 +131,9 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1     # Windows PowerShell
 
 Both run `node install.mjs`, which:
 
-1. copies hooks and tools to `~/.claude/claude-memory/` and writes `memsearch` and `claude-memory` launchers to `~/.claude/claude-memory/bin/`;
+1. copies hooks and tools to `~/.claude/elephant-memory/` and writes `memsearch` and `elephant-memory` launchers to `~/.claude/elephant-memory/bin/`;
 2. installs the `/wrap` and `/sleep` skills to `~/.claude/skills/` (a different skill with the same name is moved aside, not overwritten);
-3. adds a short block of memory conventions to `~/.claude/CLAUDE.md` between `claude-memory` markers;
+3. adds a short block of memory conventions to `~/.claude/CLAUDE.md` between `elephant-memory` markers;
 4. registers the hooks in `~/.claude/settings.json` (backup next to it). Your other hooks and settings are kept;
 5. installs the optional embedding runtime for `memsearch --hybrid` with npm (about 100 MB including the model, downloaded on first use).
 
@@ -166,22 +164,22 @@ This installs only `/wrap` and `/sleep`. They call the elephant-memory tools and
 Steps for an agent asked to install elephant-memory for its user. Run them one by one and report what happened.
 
 1. **Check Node.js:** `node --version` must be ≥ 22.18. If it is older, stop and tell the user. The install script can also use another binary with `--node <path>`.
-2. **Check for an existing install:** `claude plugin list` shows `elephant-memory`, or the directory `~/.claude/claude-memory/hooks/` exists (install script). If either is present, update that one instead of adding the other.
+2. **Check for an existing install:** `claude plugin list` shows `elephant-memory`, or the directory `~/.claude/elephant-memory/hooks/` exists (install script). If either is present, update that one instead of adding the other.
 3. **Ask the user one question:** the session diary sends a condensed transcript of each session (prompts and answers, no tool output) to a small model through their own `claude -p`. Do they want it? If not, use the install script with `--no-diary`.
 4. **Install.** Plugin, without prompts:
    ```sh
    claude plugin marketplace add amalashenok/elephant-memory
    claude plugin install elephant-memory@elephant-memory
    ```
-   Install script: clone to a durable place (not a temp dir; the hooks run from `~/.claude/claude-memory/`, but updates are run from the clone), then run it:
+   Install script: clone to a durable place (not a temp dir; the hooks run from `~/.claude/elephant-memory/`, but updates are run from the clone), then run it:
    ```sh
    git clone https://github.com/amalashenok/elephant-memory.git ~/elephant-memory
    node ~/elephant-memory/install.mjs            # add --no-diary, --no-live, --no-embeddings as the user chose
    ```
-5. **Verify:** `~/.claude/claude-memory/bin/memsearch lint` exits 0. For the install script, `~/.claude/settings.json` has hooks whose command contains `claude-memory/hooks/`. The plugin writes its launchers at the first session start after install, so for the plugin this check passes only after a restart.
+5. **Verify:** `~/.claude/elephant-memory/bin/memsearch lint` exits 0. For the install script, `~/.claude/settings.json` has hooks whose command contains `elephant-memory/hooks/`. The plugin writes its launchers at the first session start after install, so for the plugin this check passes only after a restart.
 6. **Tell the user:** restart Claude Code sessions to load the hooks. Memory builds up from the next session; `/wrap` before `/clear`, `/sleep` now and then (`/elephant-memory:wrap` and `/elephant-memory:sleep` with the plugin).
 
-Never edit or delete `~/.claude/projects/*/memory/` or `digests/`: they are the user's memory. To remove elephant-memory: `claude plugin uninstall elephant-memory@elephant-memory` and delete `~/.claude/claude-memory/`, or `node install.mjs --uninstall` from the clone.
+Never edit or delete `~/.claude/projects/*/memory/` or `digests/`: they are the user's memory. To remove elephant-memory: `claude plugin uninstall elephant-memory@elephant-memory` and delete `~/.claude/elephant-memory/`, or `node install.mjs --uninstall` from the clone.
 
 ## Usage
 
@@ -213,10 +211,10 @@ What you do by hand:
 | `memsearch <words>` | search notes and diaries; `--hybrid` adds meaning-based search |
 | `memsearch ls --type project --older-than 14d` | notes not touched for two weeks; also `--ticket ABC-123`, `--active`, `--archived` |
 | `memsearch lint` | broken links, notes without a description, orphans missing from the index |
-| `claude-memory live [list\|files\|watch]` | what parallel sessions are doing right now |
-| `claude-memory catchup` | write missing diary entries for recent sessions now |
+| `elephant-memory live [list\|files\|watch]` | what parallel sessions are doing right now |
+| `elephant-memory catchup` | write missing diary entries for recent sessions now |
 
-The tools live in `~/.claude/claude-memory/bin/`; add it to `PATH` to call them by name. Claude calls them by full path from the skills and the `CLAUDE.md` block.
+The tools live in `~/.claude/elephant-memory/bin/`; add it to `PATH` to call them by name. Claude calls them by full path from the skills and the `CLAUDE.md` block.
 
 ## Memory format
 
@@ -253,14 +251,14 @@ Your memory directories hold whatever you worked on, so don't commit or share `~
 | `hooks/active_tasks.mjs` | SessionStart | lists notes with `status: active` |
 | `hooks/live_sessions.mjs` | SessionStart, UserPromptSubmit, PostToolUse, SessionEnd | live registry, same-file edit warnings, a short log in `digests/live/` |
 | `memsearch/memsearch.ts` | — | SQLite FTS5 (trigram) index, optional embeddings, `ls`, `lint` |
-| `tools/claude-memory.mjs` | — | `save-wrap`, `live`, `registry`, `catchup` |
+| `tools/elephant-memory.mjs` | — | `save-wrap`, `live`, `registry`, `catchup` |
 | `skills/wrap`, `skills/sleep` | — | the two skills |
-| `hooks/plugin_setup.mjs` | SessionStart (plugin only) | launchers in `~/.claude/claude-memory/bin/`, memory conventions as context |
+| `hooks/plugin_setup.mjs` | SessionStart (plugin only) | launchers in `~/.claude/elephant-memory/bin/`, memory conventions as context |
 | `.claude-plugin/`, `hooks/hooks.json` | — | plugin manifest, marketplace entry and the plugin's hook list |
 
 The terminal window is identified by the Claude Code process ID, which survives `/clear` while the session ID does not. That's how a hand-off reaches the right window when several sessions are open in the same project. If the process tree can't be read, hand-offs fall back to the project.
 
-Hooks never fail a session: any error is written to `~/.claude/state/claude-memory.log` and the hook exits 0.
+Hooks never fail a session: any error is written to `~/.claude/state/elephant-memory.log` and the hook exits 0.
 
 ## Development
 

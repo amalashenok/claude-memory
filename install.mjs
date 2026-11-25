@@ -23,15 +23,20 @@ import { writeShim } from './hooks/lib.mjs';
 const MIN_NODE = [22, 18];
 const REPO = dirname(fileURLToPath(import.meta.url));
 const CLAUDE_HOME = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
-const TARGET = join(CLAUDE_HOME, 'claude-memory');
+const TARGET = join(CLAUDE_HOME, 'elephant-memory');
 const SETTINGS = join(CLAUDE_HOME, 'settings.json');
 const CLAUDE_MD = join(CLAUDE_HOME, 'CLAUDE.md');
 // Outside skills/: Claude Code loads every SKILL.md there, a backup would show up as a duplicate skill.
-const BACKUPS = join(CLAUDE_HOME, 'backups', 'claude-memory');
+const BACKUPS = join(CLAUDE_HOME, 'backups', 'elephant-memory');
 const SKILLS = ['wrap', 'sleep'];
-const HOOK_MARK = 'claude-memory/hooks/';
-const MD_START = '<!-- claude-memory:start -->';
-const MD_END = '<!-- claude-memory:end -->';
+const HOOK_MARK = 'elephant-memory/hooks/';
+const MD_START = '<!-- elephant-memory:start -->';
+const MD_END = '<!-- elephant-memory:end -->';
+// Install dir, hook paths and CLAUDE.md markers of releases made before the rename; removed on install and uninstall.
+const LEGACY_TARGET = join(CLAUDE_HOME, 'claude-memory');
+const LEGACY_HOOK_MARK = 'claude-memory/hooks/';
+const LEGACY_MD_START = '<!-- claude-memory:start -->';
+const LEGACY_MD_END = '<!-- claude-memory:end -->';
 const STAMP = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
 
 /** [event, script, mode, timeout seconds, feature, status message] */
@@ -112,10 +117,15 @@ const readSettings = () => {
 
 const writeSettings = (settings) => {
     if (existsSync(SETTINGS)) {
-        cpSync(SETTINGS, `${SETTINGS}.bak-claude-memory-${STAMP}`);
+        cpSync(SETTINGS, `${SETTINGS}.bak-elephant-memory-${STAMP}`);
     }
     mkdirSync(CLAUDE_HOME, { recursive: true });
     writeFileSync(SETTINGS, `${JSON.stringify(settings, null, 2)}\n`);
+};
+
+const isOurHook = (hook) => {
+    const command = slash(hook.command ?? '');
+    return command.includes(HOOK_MARK) || command.includes(LEGACY_HOOK_MARK);
 };
 
 /** Removes this package's hook commands, keeping everything else (and dropping groups left empty). */
@@ -123,7 +133,7 @@ const stripOurHooks = (settings) => {
     const hooks = settings.hooks ?? {};
     for (const [event, groups] of Object.entries(hooks)) {
         const kept = groups
-            .map((g) => ({ ...g, hooks: (g.hooks ?? []).filter((h) => !slash(h.command ?? '').includes(HOOK_MARK)) }))
+            .map((g) => ({ ...g, hooks: (g.hooks ?? []).filter((h) => !isOurHook(h)) }))
             .filter((g) => g.hooks.length);
         if (kept.length) {
             hooks[event] = kept;
@@ -196,8 +206,8 @@ const claudeMdBlock = () => `${MD_START}\n${renderSkillFile(readFileSync(join(RE
 
 const updateClaudeMd = (block) => {
     const current = existsSync(CLAUDE_MD) ? readFileSync(CLAUDE_MD, 'utf8') : '';
-    const re = new RegExp(`\\n*${MD_START}[\\s\\S]*?${MD_END}\\n?`);
-    const stripped = current.replace(re, '\n').trimEnd();
+    const blockRe = (start, end) => new RegExp(`\\n*${start}[\\s\\S]*?${end}\\n?`);
+    const stripped = current.replace(blockRe(MD_START, MD_END), '\n').replace(blockRe(LEGACY_MD_START, LEGACY_MD_END), '\n').trimEnd();
     const next = block ? `${stripped ? `${stripped}\n\n` : ''}${block}\n` : `${stripped}${stripped ? '\n' : ''}`;
     if (next !== current) {
         writeFileSync(CLAUDE_MD, next);
@@ -226,6 +236,7 @@ const install = () => {
     }
 
     rmSync(TARGET, { recursive: true, force: true });
+    rmSync(LEGACY_TARGET, { recursive: true, force: true });
     cpSync(join(REPO, 'hooks'), join(TARGET, 'hooks'), { recursive: true });
     cpSync(join(REPO, 'tools'), join(TARGET, 'tools'), { recursive: true });
     mkdirSync(join(TARGET, 'memsearch'), { recursive: true });
@@ -233,7 +244,7 @@ const install = () => {
         cpSync(join(REPO, 'memsearch', file), join(TARGET, 'memsearch', file));
     }
     writeShim(join(TARGET, 'bin'), 'memsearch', node, join(TARGET, 'memsearch', 'memsearch.ts'), '--no-warnings ');
-    writeShim(join(TARGET, 'bin'), 'claude-memory', node, join(TARGET, 'tools', 'claude-memory.mjs'));
+    writeShim(join(TARGET, 'bin'), 'elephant-memory', node, join(TARGET, 'tools', 'elephant-memory.mjs'));
 
     let embeddings = false;
     if (!opts['no-embeddings']) {
@@ -257,7 +268,7 @@ const install = () => {
   skills:     /wrap, /sleep → ${tilde(join(CLAUDE_HOME, 'skills'))}
   CLAUDE.md:  ${opts['no-claude-md'] ? 'skipped' : `memory conventions block in ${tilde(CLAUDE_MD)}`}
   memsearch:  ${bin}/memsearch${embeddings ? ' (full-text + embeddings)' : ' (full-text)'}
-  helpers:    ${bin}/claude-memory
+  helpers:    ${bin}/elephant-memory
 
 Restart Claude Code sessions to load the hooks. Optionally add ${bin} to PATH.`);
 };
@@ -267,6 +278,7 @@ const uninstall = () => {
         writeSettings(stripOurHooks(readSettings()));
     }
     rmSync(TARGET, { recursive: true, force: true });
+    rmSync(LEGACY_TARGET, { recursive: true, force: true });
     for (const name of SKILLS) {
         const dir = join(CLAUDE_HOME, 'skills', name);
         if (sameSkill(dir, renderedSkill(name))) {
@@ -278,7 +290,7 @@ const uninstall = () => {
     updateClaudeMd('');
     const state = join(CLAUDE_HOME, 'state');
     for (const name of existsSync(state) ? readdirSync(state) : []) {
-        const ours = /^(last-session-|clear-handoff-|wrap-|episodic-).*|^(live|digest-work|claude-memory\.log)$/.test(name);
+        const ours = /^(last-session-|clear-handoff-|wrap-|episodic-).*|^(live|digest-work|(elephant|claude)-memory\.log)$/.test(name);
         if (ours) {
             rmSync(join(state, name), { recursive: true, force: true });
         }

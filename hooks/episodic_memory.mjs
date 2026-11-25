@@ -297,7 +297,7 @@ const rollup = (projectDir) =>
 
 /** Precomputes memsearch embeddings when the optional embedding model is installed. */
 const embed = () => {
-    const memsearch = join(CLAUDE_HOME, 'claude-memory', 'memsearch', 'memsearch.ts');
+    const memsearch = join(CLAUDE_HOME, 'elephant-memory', 'memsearch', 'memsearch.ts');
     const model = join(dirname(memsearch), 'node_modules', '@huggingface', 'transformers');
     if (process.env.EPISODIC_EMBED === '0' || !existsSync(model)) {
         return;

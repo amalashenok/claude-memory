@@ -10,7 +10,7 @@ Goal: lose nothing when the user runs `/clear`. The summary is written by the mo
 
 ## Requirement
 
-This skill needs elephant-memory's hooks and tools. If `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/claude-memory/bin/claude-memory` does not exist (for example, only the skill was installed with `npx skills`), stop and tell the user to install elephant-memory first: in Claude Code, `/plugin marketplace add amalashenok/elephant-memory`, then `/plugin install elephant-memory@elephant-memory`; or see https://github.com/amalashenok/elephant-memory#install.
+This skill needs elephant-memory's hooks and tools. If `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/elephant-memory/bin/elephant-memory` does not exist (for example, only the skill was installed with `npx skills`), stop and tell the user to install elephant-memory first: in Claude Code, `/plugin marketplace add amalashenok/elephant-memory`, then `/plugin install elephant-memory@elephant-memory`; or see https://github.com/amalashenok/elephant-memory#install.
 
 Local files only. Do not commit, and do not post to trackers, chats or pull requests. Never write secrets, cookies or tokens.
 
@@ -34,7 +34,7 @@ The project's memory directory and the note format are given in the system promp
 - **Working rule from the user:** a `feedback` note with **Why** and **How to apply**. **Reference fact** (where things are, how they work): a `reference` note. Add every new note as a line to `MEMORY.md` or a sub-index.
 - **The session scratchpad** disappears with the session. Move scripts and exports worth keeping somewhere durable.
 
-Before creating a note, search for a duplicate: `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/claude-memory/bin/memsearch" -n 5 <words>`. Do not duplicate what git, the tracker or memory already hold: link to it.
+Before creating a note, search for a duplicate: `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/elephant-memory/bin/memsearch" -n 5 <words>`. Do not duplicate what git, the tracker or memory already hold: link to it.
 
 ## 3. Save the session summary
 
@@ -63,7 +63,7 @@ Task: <keys and links>
 Save it with the helper; the argument is the session's primary working directory from the system prompt:
 
 ```
-cat <<'EOF' | "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/claude-memory/bin/claude-memory" save-wrap "<primary working directory>"
+cat <<'EOF' | "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/elephant-memory/bin/elephant-memory" save-wrap "<primary working directory>"
 <summary>
 EOF
 ```
