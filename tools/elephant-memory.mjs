@@ -8,14 +8,24 @@
  *   elephant-memory live watch                  stream session events as they happen
  *   elephant-memory registry <memory dir>       regenerate REGISTRY.md (note ↔ case table)
  *   elephant-memory catchup [project dir]       write missing diary entries for recent sessions now
+ *   elephant-memory journal add -k <kind> "<text>" [-p dir]     add a journal entry (kinds: fact, decision,
+ *                                               rule, commitment, correction, guess)
+ *   elephant-memory journal pending [-p dir] [--before YYYY-MM-DD]   entries not promoted or skipped yet
+ *   elephant-memory journal path [-p dir]       today's journal file
+ *   elephant-memory journal check [-p dir] [--date YYYY-MM-DD] [--since HH:MM] [--skip-session id]
+ *                                               does the model keep to the journal-first rule: entries by
+ *                                               kind, direct note writes by session, notes changed that day
+ * `-p` is the project dir (default: the current dir); run from inside ~/.claude/projects/<slug>/ it is that project.
  */
 import { spawnSync } from 'node:child_process';
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
 import { StringDecoder } from 'node:string_decoder';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { parseFrontmatter } from '../hooks/frontmatter.mjs';
+import { DAY_RE, KINDS, addEntry, journalFile, memoryDirOf, notesChangedOn, pendingEntries, readEntries, readWrites } from '../hooks/journal.mjs';
 import { LOG_FILE, STATE_DIR, localDate, localTime, projectDirOf, readStdin, windowKey, writeAtomic } from '../hooks/lib.mjs';
 import { EVENTS_FILE, liveSessions } from '../hooks/live_sessions.mjs';
 
@@ -157,6 +167,73 @@ const catchup = (projectRoot) => {
     process.exitCode = r.status ?? 1;
 };
 
+const TIME_RE = /^\d{2}:\d{2}$/;
+
+const journalArgs = (args) => {
+    try {
+        return parseArgs({
+            args,
+            allowPositionals: true,
+            options: {
+                project: { type: 'string', short: 'p' },
+                kind: { type: 'string', short: 'k' },
+                before: { type: 'string' },
+                date: { type: 'string' },
+                since: { type: 'string', default: '00:00' },
+                'skip-session': { type: 'string', default: '' },
+            },
+        });
+    } catch (error) {
+        // parseArgs reads text that starts with '-' as an option
+        return fail(`journal: ${error.message} (text starting with '-'? put -- before it)`);
+    }
+};
+
+const journalCheck = (memoryDir, { date: day = localDate(), since, 'skip-session': skipSession }) => {
+    if (!DAY_RE.test(day) || !TIME_RE.test(since)) {
+        fail('journal check: --date is YYYY-MM-DD, --since is HH:MM');
+    }
+    const entries = readEntries(journalFile(memoryDir, day)).filter((e) => e.time >= since);
+    console.log(`== journal ${day} (entries from ${since}): ${entries.length}`);
+    entries.forEach((e) => console.log(e.line));
+    const byKind = Object.groupBy(entries, (e) => e.kind);
+    console.log(`-- by kind: ${Object.entries(byKind).map(([kind, list]) => `${kind} ${list.length}`).join(', ') || 'none'}`);
+    console.log(`-- not promoted or skipped yet: ${entries.filter((e) => !e.done).length}`);
+
+    console.log(`== direct note writes caught by the hook (time session tool note)`);
+    const writes = readWrites(basename(dirname(memoryDir)), day, since, skipSession);
+    writes.forEach((w) => console.log(`${w.time} ${w.session.slice(0, 8)} ${w.tool} ${w.note}`));
+    if (!writes.length) {
+        console.log('none');
+    }
+    console.log(`== notes last changed on ${day} from ${since} (indexes and journal excluded)`);
+    notesChangedOn(memoryDir, day, since).forEach((n) => console.log(`${n.time} ${n.note}`));
+};
+
+const journal = (args) => {
+    const { values, positionals } = journalArgs(args);
+    const [sub, ...rest] = positionals;
+    const memoryDir = memoryDirOf(values.project);
+    if (sub === 'add') {
+        const text = rest.join(' ').trim();
+        if (!KINDS.includes(values.kind ?? '') || !text) {
+            fail(`usage: elephant-memory journal add -k <${KINDS.join('|')}> "<text>"`);
+        }
+        console.log(`journal: ${addEntry(memoryDir, values.kind, text)}`);
+    } else if (sub === 'pending') {
+        if (values.before && !DAY_RE.test(values.before)) {
+            fail('journal pending: --before is YYYY-MM-DD');
+        }
+        pendingEntries(memoryDir, values.before).forEach((e) => console.log(`${e.file}:${e.number}:${e.line}`));
+    } else if (sub === 'path') {
+        console.log(journalFile(memoryDir));
+    } else if (sub === 'check') {
+        journalCheck(memoryDir, values);
+    } else {
+        fail('usage: elephant-memory journal add|pending|path|check (see elephant-memory --help)');
+    }
+};
+
 const help = () => {
     const source = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     console.log(source.split('*/')[0].replace(/^#!.*\n\/\*\*\n/, '').replace(/^ \* ?/gm, ''));
@@ -180,6 +257,8 @@ if (command === 'save-wrap') {
     registry(args[0]);
 } else if (command === 'catchup') {
     catchup(args[0]);
+} else if (command === 'journal') {
+    journal(args);
 } else {
     help();
     process.exitCode = command && !['-h', '--help', 'help'].includes(command) ? 2 : 0;

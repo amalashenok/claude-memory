@@ -32,12 +32,23 @@ Read `MEMORY.md` (the index) and go through `memory/*.md`. Look for and fix:
 
 - **Duplicates** — two notes about the same thing. Merge into one, delete the other, fix the index line.
 - **Stale facts** — a state that no longer holds (PR merged, branch deleted, ticket closed). If the fact is dead, delete the note and its index line; if it just moved on, update it.
-- **Contradictions** — two notes claim different things. Resolve, keep the correct one.
-- **Broken links** — `[[slug]]` or `(file.md)` pointing nowhere. Run `$TOOLS/memsearch lint --project "$SLUG"`: it lists broken links, notes without a description or with a bad type, and orphans missing from the index.
+- **Contradictions** — two notes claim different things. Resolve by replacement, not deletion: the wrong fact becomes `~~…~~ [replaced YYYY-MM-DD: reason]`, a wrong note as a whole gets `status: superseded` and `superseded_by`.
+- **Superseded notes** — `memsearch lint` lists links to them and `superseded_by` without a target. Move the links to the new note; drop the superseded one from `MEMORY.md` (the archive sub-index may keep it).
+- **Broken links** — `[[slug]]` or `(file.md)` pointing nowhere. Run `$TOOLS/memsearch lint --project "$SLUG"`: it lists broken links, notes without a description or with a bad type, orphans missing from the index, superseded notes still linked, and journal entries of earlier days left unprocessed.
 - **Index drift** — a note without an index line, or an index line without a note. Exception: active tasks are not listed in `MEMORY.md`; they carry `status: active`, `title`, `next` (optionally `group`) in the frontmatter and the `active_tasks` hook prints them at session start. A closed task gets `status: done` and a line in `index_archive.md`; a task that moved on gets a new `next`.
 - **Relative dates** — "yesterday", "last week" → absolute dates.
 
 Edit conservatively: when in doubt, leave it and report it as "needs a decision". Never delete what you cannot prove dead.
+
+## 1a. Journal leftovers
+
+Entries from earlier days that `/wrap` never processed (the session ended without it):
+
+```bash
+"$TOOLS/elephant-memory" journal pending --before "$(date +%F)"
+```
+
+Process them like step 2a of `/wrap`: the write filter from the memory conventions, then promotion into a note with ` → [[note-name]]` or ` → skipped: <reason>`. Leave today's entries alone: `/wrap` handles them.
 
 ## 2. Findings from the conversation
 
@@ -47,7 +58,7 @@ Read `$LATEST`. Extract only what **outlives the session** and is not written do
 - A fact about the user, the team or the project that cannot be derived from code or git → `type: user` / `project`.
 - A decision on a task, a new state, a parked question → `type: project`.
 
-Do not record what memory, the code, CLAUDE.md or git already hold, or anything momentary. When unsure whether it lasts, skip it. Before writing, check for a note to extend instead. Each new note gets a line in `MEMORY.md`, except an active task (see step 1). Link related notes with `[[slug]]`.
+Record only what passes the write filter from the memory conventions. Do not record what memory, the code, CLAUDE.md or git already hold, or anything momentary. When unsure whether it lasts, skip it. Before writing, check for a note to extend instead. Each new note gets a line in `MEMORY.md`, except an active task (see step 1). Link related notes with `[[slug]]`.
 
 ## 2a. The user's lexicon
 

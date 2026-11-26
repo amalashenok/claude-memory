@@ -9,10 +9,13 @@
  * Needs Node >= 22.18 (node:sqlite + native TypeScript); the installer puts a `memsearch` shim on disk.
  * Paths are handled with forward slashes on every OS, so Windows paths work too.
  *
+ * Sources: memory notes (memory/*.md), the memory journal (memory/journal/*.md, kind `journal`)
+ * and session digests (digests/**.md, kind `digest`).
+ *
  * Commands (a bare query is the same as `search`):
  *   memsearch [search] [-n N] [--project S] [--type T] [--kind K] [--sem|--hybrid] words...
  *   memsearch ls [--type T] [--kind K] [--older-than 14d] [--newer-than 3d] [--ticket ABC-123] [--active|--archived]
- *   memsearch lint [--project S]
+ *   memsearch lint [--project S]   # links, index, superseded notes, journal entries left unprocessed
  *   memsearch embed            # precompute embeddings for the current index
  */
 import { createHash } from 'node:crypto';
@@ -36,7 +39,7 @@ const PROJECTS_DIR = join(CLAUDE_HOME, 'projects');
 const CACHE_DIR = toPosix(process.env.MEMSEARCH_CACHE ?? join(HOME, '.cache/memsearch'));
 const VEC_PATH = join(CACHE_DIR, 'vectors.db');
 const MODEL_CACHE = join(CACHE_DIR, 'models');
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const MODEL = process.env.MEMSEARCH_MODEL ?? 'Xenova/multilingual-e5-small';
 const IS_E5 = MODEL.includes('e5'); // e5 models expect "query: " / "passage: " prefixes
 const QUERY_PREFIX = IS_E5 ? 'query: ' : '';
@@ -54,12 +57,17 @@ const WIKI_LINK_RE = /\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g;
 const MD_LINK_RE = /\]\(([^)\s#]+\.md)(?:#[^)]*)?\)/g;
 const DATE_RE = /(\d{4}-\d{2}-\d{2})/;
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const SUPERSEDED = 'superseded';
+const JOURNAL_DIR = 'journal';
+const JOURNAL_ENTRY_RE = /^- \d{2}:\d{2} \[[a-z]+\] /;
+// Only a mark at the end counts: the entry text may contain an arrow or a [[link]] itself.
+const JOURNAL_DONE_RE = / → (?:\[\[[^\]]+\]\](?:,\s*\[\[[^\]]+\]\])*|skipped: .+)$/;
 const DURATION_DAYS: Record<string, number> = Object.freeze({ d: 1, w: 7, m: 30 });
 const DAY_SECONDS = 86400;
 
 const SCHEMA = `
 CREATE TABLE files(path TEXT PRIMARY KEY, project TEXT, kind TEXT, name TEXT, description TEXT,
-                   type TEXT, node_type TEXT, updated REAL, archived INTEGER DEFAULT 0, status TEXT);
+                   type TEXT, node_type TEXT, updated REAL, archived INTEGER DEFAULT 0, status TEXT, superseded_by TEXT);
 CREATE TABLE tickets(path TEXT, ticket TEXT, is_primary INTEGER, hits INTEGER);
 CREATE TABLE links(src TEXT, target TEXT, dst TEXT, form TEXT);
 CREATE TABLE win(chunk INTEGER, sha TEXT);
@@ -86,6 +94,10 @@ const sourceFiles = (): string[] => {
     const memory = join(PROJECTS_DIR, project, 'memory');
     if (existsSync(memory)) {
       files.push(...readdirSync(memory).filter((f) => f.endsWith('.md') && !GENERATED_FILES.has(f)).map((f) => join(memory, f)));
+    }
+    const journal = join(memory, JOURNAL_DIR);
+    if (existsSync(journal)) {
+      files.push(...readdirSync(journal).filter((f) => f.endsWith('.md')).map((f) => join(journal, f)));
     }
     const digests = join(PROJECTS_DIR, project, 'digests');
     if (existsSync(digests)) {
@@ -138,14 +150,19 @@ const parseFrontmatter = (lines: string[]): { meta: Meta; bodyStart: number } =>
   return { meta, bodyStart: 0 };
 };
 
+const isJournal = (path: string): boolean => path.includes(`/memory/${JOURNAL_DIR}/`);
+
+const kindOf = (path: string): string => (path.includes('/digests/') ? 'digest' : isJournal(path) ? 'journal' : 'memory');
+
 const parseUpdated = (meta: Meta, path: string): number => {
   // a bare date is a local day, while Date.parse would read it as UTC midnight
   const modified = meta.modified ? Date.parse(DATE_ONLY_RE.test(meta.modified) ? `${meta.modified}T00:00:00` : meta.modified) : NaN;
   if (!Number.isNaN(modified)) {
     return modified / 1000;
   }
-  const digestDate = path.includes('/digests/') ? path.split('/digests/')[1].match(DATE_RE)?.[1] : undefined;
-  return digestDate ? Date.parse(`${digestDate}T00:00:00`) / 1000 : mtimeSeconds(path);
+  const datedPart = path.includes('/digests/') ? path.split('/digests/')[1] : isJournal(path) ? basename(path) : undefined;
+  const date = datedPart?.match(DATE_RE)?.[1];
+  return date ? Date.parse(`${date}T00:00:00`) / 1000 : mtimeSeconds(path);
 };
 
 // ~/.claude/projects/<slug of the project path>: drop the home dir (and a projects/ folder) from the slug
@@ -200,7 +217,7 @@ const rebuild = (files: string[]): void => {
   const raw: Raw[] = files.map((file) => {
     const lines = readFileSync(file, 'utf8').split(/\r?\n/);
     const { meta, bodyStart } = parseFrontmatter(lines);
-    const kind = file.includes('/digests/') ? 'digest' : 'memory';
+    const kind = kindOf(file);
     const stem = basename(file, '.md');
     const name = meta.name || stem;
     if (kind === 'memory') {
@@ -214,14 +231,27 @@ const rebuild = (files: string[]): void => {
     return { file, kind, name, meta, lines, bodyStart };
   });
 
-  const insertFile = db.prepare('INSERT INTO files(path, project, kind, name, description, type, node_type, updated, status) VALUES (?,?,?,?,?,?,?,?,?)');
+  const insertFile = db.prepare(
+    'INSERT INTO files(path, project, kind, name, description, type, node_type, updated, status, superseded_by) VALUES (?,?,?,?,?,?,?,?,?,?)',
+  );
   const insertNote = db.prepare('INSERT INTO notes(path, line, heading, body) VALUES (?,?,?,?)');
   const insertWin = db.prepare('INSERT INTO win VALUES (?,?)');
   const insertTicket = db.prepare('INSERT INTO tickets VALUES (?,?,?,?)');
   const insertLink = db.prepare('INSERT INTO links VALUES (?,?,?,?)');
 
   for (const { file, kind, name, meta, lines, bodyStart } of raw) {
-    insertFile.run(file, projectOf(file), kind, name, meta.description ?? '', meta.type ?? '', meta.node_type ?? '', parseUpdated(meta, file), meta.status ?? '');
+    insertFile.run(
+      file,
+      projectOf(file),
+      kind,
+      name,
+      meta.description ?? '',
+      meta.type ?? '',
+      meta.node_type ?? '',
+      parseUpdated(meta, file),
+      meta.status ?? '',
+      meta.superseded_by ?? null,
+    );
 
     const body = lines.slice(bodyStart).join('\n');
     for (const { line, heading, text } of chunks(lines, bodyStart, basename(file))) {
@@ -387,8 +417,9 @@ const semSearch = async (db: DatabaseSync, words: string[], filters: Filters, li
 const printChunks = (db: DatabaseSync, rowids: number[], scores?: Map<number, number>): void => {
   for (const id of rowids) {
     const { path, line, heading, body } = db.prepare('SELECT path, line, heading, body FROM notes WHERE rowid = ?').get(id) as Row;
-    const { type, updated } = db.prepare('SELECT type, updated FROM files WHERE path = ?').get(path) as Row;
-    const meta = [type, isoDate(updated), scores ? scores.get(id)!.toFixed(2) : ''].filter(Boolean).join(', ');
+    const { type, updated, status } = db.prepare('SELECT type, updated, status FROM files WHERE path = ?').get(path) as Row;
+    const superseded = status === SUPERSEDED ? SUPERSEDED.toUpperCase() : '';
+    const meta = [superseded, type, isoDate(updated), scores ? scores.get(id)!.toFixed(2) : ''].filter(Boolean).join(', ');
     const text = String(body).replace(/\s+/g, ' ').trim();
     console.log(`${short(path)}:${line}  [${heading}]  (${meta})\n  ${text.slice(0, SNIPPET_CHARS)}\n`);
   }
@@ -458,13 +489,54 @@ const cmdLs = (opts: Opts): void => {
   }
   const order = ({ updated: 'f.updated', '-updated': 'f.updated DESC', name: 'f.name' } as Record<string, string>)[opts.sort] ?? fail('bad --sort');
   const rows = db
-    .prepare(`SELECT f.updated, f.type, f.kind, f.project, f.name, f.description, f.archived FROM files f WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ?`)
+    .prepare(`SELECT f.updated, f.type, f.kind, f.project, f.name, f.description, f.archived, f.status FROM files f WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ?`)
     .all(...params, Number(opts.n)) as Row[];
   for (const r of rows) {
     const description = String(r.description).replace(/\s+/g, ' ').slice(0, 80);
-    console.log(`${isoDate(r.updated)}  ${(r.type || '-').padEnd(9)} ${r.kind.padEnd(7)} ${r.project.slice(0, 14).padEnd(14)} ${r.name}${r.archived ? ' [archive]' : ''}  ${description}`);
+    console.log(`${isoDate(r.updated)}  ${(r.type || '-').padEnd(9)} ${r.kind.padEnd(7)} ${r.project.slice(0, 14).padEnd(14)} ${r.name}${r.archived ? ' [archive]' : ''}${r.status === SUPERSEDED ? ' [superseded]' : ''}  ${description}`);
   }
   console.log(`(${rows.length} shown)`);
+};
+
+/** A superseded note names its replacement, and nothing but the archive index still links to it. */
+const lintSuperseded = (db: DatabaseSync, notes: Row[]): string[] => {
+  const out: string[] = [];
+  const byName = new Map(notes.flatMap((n) => [[n.name, n.path], [basename(n.path, '.md'), n.path]]));
+  for (const { path, status, superseded_by: replacement } of notes) {
+    if (status !== SUPERSEDED) {
+      continue;
+    }
+    const base = basename(path, '.md');
+    if (!replacement) {
+      out.push(`superseded without superseded_by: ${base}`);
+    } else if (!byName.has(replacement)) {
+      out.push(`superseded_by points to a missing note: ${base} -> ${replacement}`);
+    }
+    const linkers = db
+      .prepare("SELECT DISTINCT l.src FROM links l JOIN files f ON f.path = l.src WHERE l.dst = ? AND f.status IS NOT ? AND l.src NOT LIKE '%/index_archive.md'")
+      .all(path, SUPERSEDED) as Row[];
+    // the replacement may cite the note it replaces
+    linkers
+      .filter((r) => byName.get(replacement) !== r.src)
+      .forEach((r) => out.push(`link to superseded note: ${basename(r.src)} -> ${base}`));
+  }
+  return out;
+};
+
+/** Journal entries from earlier days that /wrap or /sleep never promoted or skipped. */
+const lintJournal = (db: DatabaseSync, project: string): string[] => {
+  const today = new Date().toLocaleDateString('sv-SE');
+  const journals = db.prepare("SELECT path FROM files WHERE project = ? AND kind = 'journal' ORDER BY path").all(project) as Row[];
+  return journals.flatMap(({ path }) => {
+    const day = basename(path, '.md');
+    if (day >= today) {
+      return [];
+    }
+    const pending = readFileSync(path, 'utf8')
+      .split(/\r?\n/)
+      .filter((line) => JOURNAL_ENTRY_RE.test(line) && !JOURNAL_DONE_RE.test(line)).length;
+    return pending ? [`journal ${day}: ${pending} entries neither promoted nor skipped`] : [];
+  });
 };
 
 const cmdLint = (opts: Opts): void => {
@@ -478,7 +550,9 @@ const cmdLint = (opts: Opts): void => {
       .all(project) as Row[];
     broken.forEach((r) => out.push(`broken link: ${basename(r.src)} -> ${r.target}`));
 
-    const notes = db.prepare("SELECT path, type, name, description, status FROM files WHERE project = ? AND kind = 'memory' ORDER BY name").all(project) as Row[];
+    const notes = db
+      .prepare("SELECT path, type, name, description, status, superseded_by FROM files WHERE project = ? AND kind = 'memory' ORDER BY name")
+      .all(project) as Row[];
     for (const { path, type, name, description } of notes) {
       const base = basename(path, '.md');
       if (base === 'MEMORY') {
@@ -494,6 +568,8 @@ const cmdLint = (opts: Opts): void => {
         out.push(`name '${name}' differs from file name: ${base}`);
       }
     }
+    out.push(...lintSuperseded(db, notes));
+    out.push(...lintJournal(db, project));
 
     const indexed = new Set(
       (
@@ -507,7 +583,7 @@ const cmdLint = (opts: Opts): void => {
     // active tasks are listed by the active_tasks SessionStart hook, not by MEMORY.md
     for (const { path, status } of notes) {
       const base = basename(path);
-      if (base === 'MEMORY.md' || base.startsWith('index_') || indexed.has(path) || status === 'active') {
+      if (base === 'MEMORY.md' || base.startsWith('index_') || indexed.has(path) || status === 'active' || status === SUPERSEDED) {
         continue;
       }
       const inbound = (db.prepare('SELECT COUNT(DISTINCT src) AS c FROM links WHERE dst = ?').get(path) as Row).c;

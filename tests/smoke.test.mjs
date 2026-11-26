@@ -35,6 +35,10 @@ const run = (file, args = [], input = undefined, extraEnv = {}) => {
     return r.stdout;
 };
 
+/** Like run, for tools that exit non-zero on findings (memsearch lint). */
+const runAnyExit = (file, args = []) =>
+    spawnSync(process.execPath, ['--no-warnings', file, ...args], { input: '', encoding: 'utf8', env, timeout: 60_000 }).stdout;
+
 const hook = (name, args, payload) => run(join(HOOKS, name), args, payload);
 const cli = (args, input) => run(join(REPO, 'tools', 'elephant-memory.mjs'), args, input);
 
@@ -196,6 +200,68 @@ describe('memory notes', () => {
     });
 });
 
+describe('journal and write gate', () => {
+    const memsearch = () => join(REPO, 'memsearch', 'memsearch.ts');
+    const memoryDir = () => join(projectDir, 'memory');
+    const journalOf = (day) => join(memoryDir(), 'journal', `${day}.md`);
+    const gate = (sessionId, tool, input) => hook('memory_write_gate.mjs', [], { session_id: sessionId, tool_name: tool, tool_input: input });
+    const writesLog = () => readFileSync(join(home, 'state', 'memory-gate', 'writes.log'), 'utf8');
+
+    test('journal add appends an entry to today\'s file', () => {
+        assert.match(cli(['journal', 'add', '-p', project, '-k', 'fact', 'retries are safe → with the key']), /journal: /);
+        assert.match(readFileSync(journalOf(localDate()), 'utf8'), /^- \d{2}:\d{2} \[fact\] retries are safe → with the key$/m);
+        assert.equal(cli(['journal', 'path', '-p', project]).trim(), journalOf(localDate()));
+    });
+
+    test('pending lists entries without a mark; an arrow inside the text is not a mark', () => {
+        mkdirSync(join(memoryDir(), 'journal'), { recursive: true });
+        writeFileSync(journalOf('2000-01-01'), '# Journal 2000-01-01\n\n- 10:00 [fact] a → b inside the text\n- 10:30 [fact] renamed → [[old_name]] in v2\n- 11:00 [rule] promoted → [[project_checkout_timeout]], [[user_role]]\n- 12:00 [guess] dropped → skipped: not confirmed\n');
+        const pending = cli(['journal', 'pending', '-p', project, '--before', localDate()]);
+        assert.match(pending, /2000-01-01\.md:3:- 10:00 \[fact\] a → b inside the text/);
+        assert.match(pending, /renamed → \[\[old_name\]\] in v2/);
+        assert.doesNotMatch(pending, /promoted|dropped|retries are safe/);
+    });
+
+    test('lint reports unprocessed journal entries of earlier days and superseded notes', () => {
+        const superseded = join(memoryDir(), 'project_old_plan.md');
+        writeFileSync(superseded, '---\nname: project_old_plan\ndescription: "old plan"\ntype: project\nstatus: superseded\n---\nold\n');
+        const lint = runAnyExit(memsearch(), ['lint']);
+        assert.match(lint, /journal 2000-01-01: 2 entries neither promoted nor skipped/);
+        assert.match(lint, /superseded without superseded_by: project_old_plan/);
+        rmSync(superseded);
+        writeFileSync(journalOf('2000-01-01'), '# Journal 2000-01-01\n\n- 10:00 [fact] a → b inside the text → skipped: test\n');
+        assert.match(run(memsearch(), ['lint']), /0 problems/);
+    });
+
+    test('the gate reminds once per session and logs every direct write', () => {
+        const note = join(memoryDir(), 'project_checkout_timeout.md');
+        assert.match(JSON.parse(gate('gate-a', 'Write', { file_path: note })).hookSpecificOutput.additionalContext, /journal add/);
+        assert.equal(gate('gate-a', 'Edit', { file_path: note }), '');
+        assert.equal(gate('gate-b', 'Write', { file_path: join(memoryDir(), 'MEMORY.md') }), '');
+        assert.equal(gate('gate-b', 'Write', { file_path: join(memoryDir(), 'REGISTRY.md') }), '');
+        assert.equal(gate('gate-b', 'Write', { file_path: journalOf(localDate()) }), '');
+        assert.match(writesLog(), /\tgate-a\tEdit\t[^\t]+\tproject_checkout_timeout\.md$/m);
+        gate('gate-a', 'Write', { file_path: join(memoryDir(), 'my note.md') });
+        assert.match(cli(['journal', 'check', '-p', project]), /gate-a Write my note\.md/);
+    });
+
+    test('the gate catches Bash writes and ignores reads', () => {
+        const dir = memoryDir().replaceAll('\\', '/');
+        assert.equal(gate('gate-c', 'Bash', { command: `cat "${dir}/project_checkout_timeout.md"` }), '');
+        assert.match(gate('gate-c', 'Bash', { command: `cd "${dir}" && sed -i 's/a/b/' project_checkout_timeout.md` }), /journal add/);
+        gate('gate-c', 'Bash', { command: `D="${dir}"; cat > $D/project_brand_new.md <<'EOF'\nx\nEOF` });
+        assert.match(writesLog(), /\tgate-c\tBash\t[^\t]+\tproject_brand_new\.md$/m);
+        gate('gate-c', 'Bash', { command: `sed --in-place 's/a/b/' "${dir}/user_role.md"` });
+        assert.match(writesLog(), /\tgate-c\tBash\t[^\t]+\tuser_role\.md$/m);
+        gate('gate-d', 'Bash', { command: `cat "${dir}/user_role.md" > $TMPDIR/out.md; sed -i 's/a/b/' ~/projects/app/memory/cache.md` });
+        assert.doesNotMatch(writesLog(), /\t(?:out|cache)\.md$/m);
+        const check = cli(['journal', 'check', '-p', project, '--skip-session', 'gate-a']);
+        assert.match(check, /Bash project_checkout_timeout\.md/);
+        assert.doesNotMatch(check, /gate-a/);
+        assert.match(check, /by kind: fact 1/);
+    });
+});
+
 describe('live sessions', () => {
     const edit = (sid, file) => hook('live_sessions.mjs', ['tool'], { session_id: sid, cwd: project, tool_name: 'Edit', tool_input: { file_path: file } });
 
@@ -235,7 +301,8 @@ describe('installer', () => {
     test('install adds hooks, skills, tools and the CLAUDE.md block, and is idempotent', () => {
         install();
         const count = ourCommands().length;
-        assert.equal(count, 10);
+        assert.equal(count, 11);
+        assert.equal(settings().hooks.PreToolUse.find((g) => g.hooks.some((h) => h.command.includes('memory_write_gate'))).matcher, 'Write|Edit|Bash');
         install();
         assert.equal(ourCommands().length, count);
         assert.equal(settings().model, 'opus');
@@ -271,7 +338,7 @@ describe('installer', () => {
         mkdirSync(join(target, 'claude-memory', 'hooks'), { recursive: true });
         install();
         assert.equal(Object.values(settings().hooks).flat().flatMap((g) => g.hooks).filter((h) => h.command.includes('claude-memory')).length, 0);
-        assert.equal(ourCommands().length, 10);
+        assert.equal(ourCommands().length, 11);
         assert.ok(!existsSync(join(target, 'claude-memory')));
         const md = readFileSync(join(target, 'CLAUDE.md'), 'utf8');
         assert.doesNotMatch(md, /claude-memory/);

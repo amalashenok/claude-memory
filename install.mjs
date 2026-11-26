@@ -39,13 +39,14 @@ const LEGACY_MD_START = '<!-- claude-memory:start -->';
 const LEGACY_MD_END = '<!-- claude-memory:end -->';
 const STAMP = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
 
-/** [event, script, mode, timeout seconds, feature, status message] */
+/** [event, script, mode, timeout seconds, feature, status message, tool matcher] */
 const HOOKS = Object.freeze([
     ['SessionStart', 'session_resume_hint.mjs', '', 20, 'core', 'Reading the last session snapshot'],
     ['SessionStart', 'episodic_memory.mjs', 'recall', 10, 'diary', 'Recalling today and the last working day'],
     ['SessionStart', 'active_tasks.mjs', '', 5, 'core', 'Collecting active tasks from memory'],
     ['SessionStart', 'live_sessions.mjs', 'start', 5, 'live'],
     ['UserPromptSubmit', 'live_sessions.mjs', 'prompt', 5, 'live'],
+    ['PreToolUse', 'memory_write_gate.mjs', '', 5, 'core', '', 'Write|Edit|Bash'],
     ['PostToolUse', 'live_sessions.mjs', 'tool', 5, 'live'],
     ['Stop', 'session_snapshot.mjs', '', 10, 'core'],
     ['SessionEnd', 'session_snapshot.mjs', '', 20, 'core'],
@@ -152,16 +153,18 @@ const stripOurHooks = (settings) => {
 const addOurHooks = (settings, node, features) => {
     settings.hooks ??= {};
     const byEvent = new Map();
-    for (const [event, script, mode, timeout, feature, statusMessage] of HOOKS) {
+    for (const [event, script, mode, timeout, feature, statusMessage, matcher = ''] of HOOKS) {
         if (!features.has(feature)) {
             continue;
         }
         const command = `"${slash(node)}" "${slash(join(TARGET, 'hooks', script))}"${mode ? ` ${mode}` : ''}`;
         const hook = { type: 'command', command, timeout, ...(statusMessage ? { statusMessage } : {}) };
-        byEvent.set(event, [...(byEvent.get(event) ?? []), hook]);
+        const key = `${event}\t${matcher}`;
+        byEvent.set(key, [...(byEvent.get(key) ?? []), hook]);
     }
-    for (const [event, hooks] of byEvent) {
-        settings.hooks[event] = [...(settings.hooks[event] ?? []), { hooks }];
+    for (const [key, hooks] of byEvent) {
+        const [event, matcher] = key.split('\t');
+        settings.hooks[event] = [...(settings.hooks[event] ?? []), { ...(matcher ? { matcher } : {}), hooks }];
     }
     return settings;
 };

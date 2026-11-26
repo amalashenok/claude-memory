@@ -41,6 +41,7 @@ Or ask Claude: *"Install elephant-memory from github.com/amalashenok/elephant-me
 | task status lives in your head | notes marked `status: active` are listed at every session start, with the next step |
 | two Claude windows quietly edit the same file | a live registry shows the other sessions and warns about edits to the same file |
 | memory notes pile up, go stale and contradict each other | `/sleep` merges duplicates and fixes stale facts and broken links; `memsearch lint` catches the rest |
+| everything Claude learns lands in notes, and memory fills with trivia | findings go to a daily journal first; `/wrap` and `/sleep` promote only what passes a five-question filter, and a hook flags direct writes to notes |
 | "I'm sure we wrote that down somewhere" | `memsearch` finds it across all projects, by words or by meaning |
 
 ## How it differs from other memory plugins
@@ -50,6 +51,7 @@ Most memory plugins for Claude Code save a summary when a session ends and injec
 - **Parallel sessions**: a live registry of your other Claude Code windows, with a warning before two of them edit the same file.
 - **Active tasks from note fields**: `status: active` and `next` in a note's frontmatter, not task lines kept in the index by hand.
 - **Memory that tidies itself**: `/sleep` merges duplicates, fixes stale facts and broken links, and `memsearch lint` checks the rest.
+- **A write filter**: findings go to a journal first and reach a note only through a filter; stale facts are replaced and marked, not erased.
 - **A diary rolled up by week and month**, with last week's loose ends shown at session start.
 - **Built on Claude Code's own memory** (`MEMORY.md` and the project memory directory), not a separate store beside it.
 
@@ -62,6 +64,7 @@ Claude Code already keeps a per-project memory directory (`~/.claude/projects/<p
 - **Active tasks.** A note with `status: active`, `title`, `next` in its frontmatter is a task in progress. Every session starts with the list, so you don't have to keep task lines in the index by hand.
 - **Parallel sessions.** A live registry shows what other Claude Code windows are doing and warns when two sessions edit the same file.
 - **Search.** `memsearch` does full-text search over notes and diaries, with optional local embeddings (`--hybrid`), queries by ticket, age or type, and lints broken links and orphaned notes.
+- **Journal and write filter.** Rules from the user, corrections and task state go straight into notes; other findings are one line each in `memory/journal/<date>.md`. `/wrap` promotes today's entries that pass the filter (changes later behavior, a commitment, a decision with its reason, a lasting fact outside code and git, or the user asked), `/sleep` does the same for leftovers of earlier days. A PreToolUse hook reminds Claude once per session when it writes a note directly and logs every such write.
 - **`/wrap` and `/sleep`.** `/wrap` saves a rich summary from the model's full context before `/clear`. `/sleep` consolidates memory: merges duplicates, fixes stale facts and broken links, learns the user's terms.
 
 ```mermaid
@@ -76,9 +79,11 @@ flowchart LR
 | What | Where | Format | Written | Read |
 |---|---|---|---|---|
 | Notes and the `MEMORY.md` index | `~/.claude/projects/<project>/memory/` | Markdown | by Claude during work, `/wrap`, `/sleep` | `MEMORY.md` by Claude Code itself; active tasks by a hook at session start |
+| Memory journal | `…/<project>/memory/journal/YYYY-MM-DD.md` | Markdown | by Claude during work (`elephant-memory journal add`) | by `/wrap` and `/sleep`, which promote or skip each entry |
 | Session diary | `…/<project>/digests/days`, `weeks`, `months` | Markdown | at session end, by a small model in the background | at session start: today, the last working day, last week's loose ends |
 | `/wrap` summaries | `…/<project>/digests/wraps/`, `~/.claude/state/wrap-<window>.md` | Markdown | by `/wrap` | right after `/clear`, in the same window |
 | Snapshot "where we stopped" | `~/.claude/state/last-session-<project>.md` | Markdown | after every answer and at session end | at the next session start in the project |
+| Log of direct note writes | `~/.claude/state/memory-gate/writes.log` | text, one line per write | by the write-gate hook | `elephant-memory journal check` |
 | Live registry of sessions | `~/.claude/state/live/` | JSON files | at session start, on every prompt and tool call, at session end | at session start; `elephant-memory live` |
 | Search index | `~/.cache/memsearch/` | SQLite | by `memsearch`, when files have changed | by `memsearch` |
 
@@ -210,7 +215,8 @@ What you do by hand:
 | `/sleep` | now and then (end of day): tidies and consolidates memory, regenerates `REGISTRY.md` |
 | `memsearch <words>` | search notes and diaries; `--hybrid` adds meaning-based search |
 | `memsearch ls --type project --older-than 14d` | notes not touched for two weeks; also `--ticket ABC-123`, `--active`, `--archived` |
-| `memsearch lint` | broken links, notes without a description, orphans missing from the index |
+| `memsearch lint` | broken links, notes without a description, orphans missing from the index, links to superseded notes, unprocessed journal entries |
+| `elephant-memory journal pending` | journal entries not promoted or skipped yet; `journal check --date YYYY-MM-DD` shows whether the journal-first rule held that day |
 | `elephant-memory live [list\|files\|watch]` | what parallel sessions are doing right now |
 | `elephant-memory catchup` | write missing diary entries for recent sessions now |
 
@@ -249,9 +255,10 @@ Your memory directories hold whatever you worked on, so don't commit or share `~
 | `hooks/session_resume_hint.mjs` | SessionStart | prints the snapshot; after `/clear` prints this window's `/wrap` summary and snapshot instead |
 | `hooks/episodic_memory.mjs` | SessionEnd, SessionStart | diary entry per session (in the background), week and month roll-ups, recall |
 | `hooks/active_tasks.mjs` | SessionStart | lists notes with `status: active` |
+| `hooks/memory_write_gate.mjs` | PreToolUse (Write, Edit, Bash) | spots a direct write to a memory note, logs it, reminds about the journal once per session; never blocks |
 | `hooks/live_sessions.mjs` | SessionStart, UserPromptSubmit, PostToolUse, SessionEnd | live registry, same-file edit warnings, a short log in `digests/live/` |
 | `memsearch/memsearch.ts` | — | SQLite FTS5 (trigram) index, optional embeddings, `ls`, `lint` |
-| `tools/elephant-memory.mjs` | — | `save-wrap`, `live`, `registry`, `catchup` |
+| `tools/elephant-memory.mjs`, `hooks/journal.mjs` | — | `save-wrap`, `live`, `registry`, `catchup`, `journal` |
 | `skills/wrap`, `skills/sleep` | — | the two skills |
 | `hooks/plugin_setup.mjs` | SessionStart (plugin only) | launchers in `~/.claude/elephant-memory/bin/`, memory conventions as context |
 | `.claude-plugin/`, `hooks/hooks.json` | — | plugin manifest, marketplace entry and the plugin's hook list |

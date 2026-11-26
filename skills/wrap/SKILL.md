@@ -36,6 +36,24 @@ The project's memory directory and the note format are given in the system promp
 
 Before creating a note, search for a duplicate: `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/elephant-memory/bin/memsearch" -n 5 <words>`. Do not duplicate what git, the tracker or memory already hold: link to it.
 
+Findings from the conversation pass the same filter as the journal (step 2a). A new fact that contradicts an old one replaces it by the "replace, do not overwrite" rule from the memory conventions.
+
+## 2a. Journal → notes through the filter
+
+Promote on your own, without asking the user:
+
+```bash
+"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/elephant-memory/bin/elephant-memory" journal pending
+```
+
+For every line:
+- Apply the write filter from the memory conventions: it changes later behavior, it is a commitment, a decision with its reason, a lasting fact outside code, git and the tracker, or the user asked to remember it. A `[guess]` passes only when this session confirmed it.
+- It passes: extend a fitting note or create one (type and index as in step 2), resolve a contradiction by replacement, and append ` → [[note-name]]` to the journal line.
+- It does not: append ` → skipped: <reason in 2–5 words>`.
+- Several entries about one thing go into one note, each line gets its own mark.
+
+Mark lines by editing the journal file; do not rewrite the entries themselves.
+
 ## 3. Save the session summary
 
 Markdown, up to 40 lines, from this template; omit empty sections:
