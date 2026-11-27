@@ -1,0 +1,24 @@
+title: elephant-memory
+description: "Long-term memory for Claude Code: where-we-stopped snapshots after /clear, an automatic work diary, active tasks and awareness of parallel sessions. Plain Markdown, Claude Code plugin, Linux/macOS/Windows."
+url: https://amalashenok.github.io
+baseurl: /elephant-memory
+theme: jekyll-theme-cayman
+plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap
+  - jekyll-relative-links
+github:
+  repository_url: https://github.com/amalashenok/elephant-memory
+exclude:
+  - .claude-plugin
+  - .github
+  - hooks
+  - memsearch
+  - skills
+  - snippets
+  - tests
+  - tools
+  - install.mjs
+  - install.sh
+  - install.ps1
+  - docs/demo

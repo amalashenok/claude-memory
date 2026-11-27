@@ -1,4 +1,4 @@
-# elephant-memory
+# elephant-memory: long-term memory for Claude Code
 
 [![tests](https://github.com/amalashenok/elephant-memory/actions/workflows/tests.yml/badge.svg)](https://github.com/amalashenok/elephant-memory/actions/workflows/tests.yml)
 
@@ -10,7 +10,7 @@ Every `/clear`, every restart, every new window, and [Claude Code](https://docs.
   <img src="docs/demo.svg" alt="A new Claude Code session answers 'Where did we stop, and what's next?' with the branch, uncommitted files, tests, the next step and side tasks" width="900">
 </p>
 
-<sub>A real answer from Claude on the fictional demo project from <a href="examples/memory">examples/</a>. The lines under “context loaded” are a condensed view of what the hooks hand to Claude at session start.</sub>
+<sub>A real answer from Claude on the fictional demo project from <a href="https://github.com/amalashenok/elephant-memory/tree/main/examples/memory">examples/</a>. The lines under “context loaded” are a condensed view of what the hooks hand to Claude at session start.</sub>
 
 Nobody wrote that answer down for Claude. It comes from a snapshot of where the last session stopped, a work diary that writes itself, your notes on tasks in progress, and even your own rule about small pull requests.
 
@@ -224,7 +224,7 @@ The tools live in `~/.claude/elephant-memory/bin/`; add it to `PATH` to call the
 
 ## Memory format
 
-See [docs/memory-format.md](docs/memory-format.md) for the note format, the frontmatter fields the hooks read, and the on-disk layout. [examples/memory/](examples/memory/) is a small fictional project memory to start from.
+See [docs/memory-format.md](docs/memory-format.md) for the note format, the frontmatter fields the hooks read, and the on-disk layout. [examples/memory/](https://github.com/amalashenok/elephant-memory/tree/main/examples/memory) is a small fictional project memory to start from.
 
 ## Configuration
 
