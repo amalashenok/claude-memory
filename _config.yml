@@ -21,4 +21,5 @@ exclude:
   - install.mjs
   - install.sh
   - install.ps1
-  - docs/demo
+  - docs/demo/make_demo_svg.py
+  - docs/demo/answer.txt
